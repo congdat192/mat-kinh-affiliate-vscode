@@ -16,13 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -384,17 +378,14 @@ const ProfilePage = () => {
                 <div className="space-y-2">
                   <Label htmlFor="gender">Giới tính</Label>
                   <Select
+                    id="gender"
                     value={userData.gender}
-                    onValueChange={(value) => setUserData({ ...userData, gender: value })}
+                    onChange={(e) => setUserData({ ...userData, gender: e.target.value })}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn giới tính" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male">Nam</SelectItem>
-                      <SelectItem value="female">Nữ</SelectItem>
-                      <SelectItem value="other">Khác</SelectItem>
-                    </SelectContent>
+                    <option value="">Chọn giới tính</option>
+                    <option value="male">Nam</option>
+                    <option value="female">Nữ</option>
+                    <option value="other">Khác</option>
                   </Select>
                 </div>
 
@@ -436,21 +427,18 @@ const ProfilePage = () => {
                 <div className="space-y-2">
                   <Label htmlFor="bankName">Ngân hàng</Label>
                   <Select
+                    id="bankName"
                     value={userData.bankName}
-                    onValueChange={(value) =>
-                      setUserData({ ...userData, bankName: value })
+                    onChange={(e) =>
+                      setUserData({ ...userData, bankName: e.target.value })
                     }
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Chọn ngân hàng" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {vietnamBanks.map((bank) => (
-                        <SelectItem key={bank.value} value={bank.value}>
-                          {bank.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
+                    <option value="">Chọn ngân hàng</option>
+                    {vietnamBanks.map((bank) => (
+                      <option key={bank.value} value={bank.value}>
+                        {bank.label}
+                      </option>
+                    ))}
                   </Select>
                 </div>
 

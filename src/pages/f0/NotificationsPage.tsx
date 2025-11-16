@@ -14,13 +14,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select } from '@/components/ui/select';
 
 // Notification types
 type NotificationType = 'referral' | 'commission' | 'withdrawal' | 'announcement' | 'alert';
@@ -263,15 +257,14 @@ const NotificationsPage = () => {
 
                 <div className="flex items-center gap-2">
                   <Filter className="w-4 h-4 text-gray-500" />
-                  <Select value={filter} onValueChange={(value: NotificationFilter) => setFilter(value)}>
-                    <SelectTrigger className="w-[140px] h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tất cả</SelectItem>
-                      <SelectItem value="unread">Chưa đọc</SelectItem>
-                      <SelectItem value="read">Đã đọc</SelectItem>
-                    </SelectContent>
+                  <Select
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value as NotificationFilter)}
+                    className="w-[140px] h-9"
+                  >
+                    <option value="all">Tất cả</option>
+                    <option value="unread">Chưa đọc</option>
+                    <option value="read">Đã đọc</option>
                   </Select>
                 </div>
               </div>
