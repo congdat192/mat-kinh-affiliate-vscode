@@ -1,4 +1,4 @@
-import { TierConfig } from '@/types';
+import type { TierConfig } from '@/types';
 
 export const TIER_CONFIGS: Record<string, TierConfig> = {
   silver: {
