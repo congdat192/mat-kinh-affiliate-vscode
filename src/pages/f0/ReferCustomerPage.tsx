@@ -10,6 +10,10 @@ import {
   Check,
   Gift,
   ArrowRight,
+  Search,
+  CheckCircle,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,6 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select } from '@/components/ui/select';
+import { customerService, type CheckCustomerResult } from '@/services/customerService';
 
 // Mock data for referral links
 const mockReferralLinks = [
@@ -97,6 +102,10 @@ const ReferCustomerPage = () => {
   // Form validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // Customer check states
+  const [isCheckingCustomer, setIsCheckingCustomer] = useState(false);
+  const [customerCheckResult, setCustomerCheckResult] = useState<CheckCustomerResult | null>(null);
+
   // Validate phone number (Vietnamese format)
   const validatePhone = (phone: string): boolean => {
     const phoneRegex = /^(0|\+84)[0-9]{9}$/;
@@ -110,13 +119,43 @@ const ReferCustomerPage = () => {
     return emailRegex.test(email);
   };
 
+  // Check customer type (old/new)
+  const handleCheckCustomer = async () => {
+    // Clear previous check result
+    setCustomerCheckResult(null);
+    setErrors({});
+
+    // Validate phone number first
+    if (!phoneNumber.trim()) {
+      setErrors({ phoneNumber: 'Vui lòng nhập số điện thoại' });
+      return;
+    }
+
+    if (!validatePhone(phoneNumber)) {
+      setErrors({ phoneNumber: 'Số điện thoại không hợp lệ (VD: 0901234567)' });
+      return;
+    }
+
+    // Call API to check customer
+    setIsCheckingCustomer(true);
+    try {
+      const result = await customerService.checkCustomerType(phoneNumber);
+      setCustomerCheckResult(result);
+    } catch (error) {
+      setCustomerCheckResult({
+        isValid: false,
+        customerType: null,
+        message: 'Lỗi khi kiểm tra khách hàng. Vui lòng thử lại.',
+        phone: phoneNumber,
+      });
+    } finally {
+      setIsCheckingCustomer(false);
+    }
+  };
+
   // Handle Step 1 validation and proceed to Step 2
   const handleNextStep = () => {
     const newErrors: Record<string, string> = {};
-
-    if (!fullName.trim()) {
-      newErrors.fullName = 'Vui lòng nhập họ tên khách hàng';
-    }
 
     if (!phoneNumber.trim()) {
       newErrors.phoneNumber = 'Vui lòng nhập số điện thoại';
@@ -126,6 +165,13 @@ const ReferCustomerPage = () => {
 
     if (email && !validateEmail(email)) {
       newErrors.email = 'Email không hợp lệ';
+    }
+
+    // Check if customer has been verified
+    if (!customerCheckResult) {
+      newErrors.customerCheck = 'Vui lòng kiểm tra loại khách hàng trước khi tiếp tục';
+    } else if (!customerCheckResult.isValid) {
+      newErrors.customerCheck = 'Không thể tiếp tục với khách hàng cũ';
     }
 
     setErrors(newErrors);
@@ -184,6 +230,7 @@ const ReferCustomerPage = () => {
     setIsSuccess(false);
     setVoucherCode('');
     setErrors({});
+    setCustomerCheckResult(null); // Reset customer check result
   };
 
   // Format date
@@ -276,10 +323,87 @@ const ReferCustomerPage = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Phone Number */}
+                  <div className="space-y-2">
+                    <Label htmlFor="phoneNumber">
+                      Số điện thoại <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Input
+                          id="phoneNumber"
+                          placeholder="0901234567"
+                          value={phoneNumber}
+                          onChange={(e) => {
+                            setPhoneNumber(e.target.value);
+                            setErrors({ ...errors, phoneNumber: '', customerCheck: '' });
+                            setCustomerCheckResult(null); // Reset check result when phone changes
+                          }}
+                          className={`pl-10 ${errors.phoneNumber ? 'border-red-500' : ''}`}
+                          disabled={isCheckingCustomer}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleCheckCustomer}
+                        disabled={isCheckingCustomer || !phoneNumber}
+                        className="shrink-0"
+                      >
+                        {isCheckingCustomer ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Đang kiểm tra...
+                          </>
+                        ) : (
+                          <>
+                            <Search className="w-4 h-4 mr-2" />
+                            Kiểm tra
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    {errors.phoneNumber && (
+                      <p className="text-xs text-red-500">{errors.phoneNumber}</p>
+                    )}
+
+                    {/* Customer Check Result */}
+                    {customerCheckResult && (
+                      <Alert variant={customerCheckResult.isValid ? 'success' : 'error'}>
+                        {customerCheckResult.isValid ? (
+                          <CheckCircle className="h-4 w-4" />
+                        ) : (
+                          <XCircle className="h-4 w-4" />
+                        )}
+                        <AlertDescription className="ml-2">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="font-medium">{customerCheckResult.message}</p>
+                              {customerCheckResult.customerType && (
+                                <p className="text-xs mt-1">
+                                  Loại khách hàng: <strong>{customerCheckResult.customerType === 'new' ? 'Khách hàng mới' : 'Khách hàng cũ'}</strong>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {errors.customerCheck && (
+                      <p className="text-xs text-red-500">{errors.customerCheck}</p>
+                    )}
+
+                    <p className="text-xs text-gray-500">
+                      Định dạng: 10 số, bắt đầu bằng 0 hoặc +84
+                    </p>
+                  </div>
+
                   {/* Full Name */}
                   <div className="space-y-2">
                     <Label htmlFor="fullName">
-                      Họ và tên <span className="text-red-500">*</span>
+                      Họ và tên (tùy chọn)
                     </Label>
                     <Input
                       id="fullName"
@@ -294,32 +418,6 @@ const ReferCustomerPage = () => {
                     {errors.fullName && (
                       <p className="text-xs text-red-500">{errors.fullName}</p>
                     )}
-                  </div>
-
-                  {/* Phone Number */}
-                  <div className="space-y-2">
-                    <Label htmlFor="phoneNumber">
-                      Số điện thoại <span className="text-red-500">*</span>
-                    </Label>
-                    <div className="relative">
-                      <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="phoneNumber"
-                        placeholder="0901234567"
-                        value={phoneNumber}
-                        onChange={(e) => {
-                          setPhoneNumber(e.target.value);
-                          setErrors({ ...errors, phoneNumber: '' });
-                        }}
-                        className={`pl-10 ${errors.phoneNumber ? 'border-red-500' : ''}`}
-                      />
-                    </div>
-                    {errors.phoneNumber && (
-                      <p className="text-xs text-red-500">{errors.phoneNumber}</p>
-                    )}
-                    <p className="text-xs text-gray-500">
-                      Định dạng: 10 số, bắt đầu bằng 0 hoặc +84
-                    </p>
                   </div>
 
                   {/* Email */}
