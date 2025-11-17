@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Gift,
   Plus,
@@ -55,9 +55,9 @@ const CampaignsPage = () => {
   });
 
   // Load campaigns on mount
-  useState(() => {
+  useEffect(() => {
     loadCampaigns();
-  });
+  }, []);
 
   const loadCampaigns = async () => {
     setIsLoading(true);
