@@ -14,6 +14,7 @@ import {
   getCampaignsByF0,
   generateVoucherCode,
 } from '@/data/mockCampaigns';
+import { externalApiService } from './externalApiService';
 
 class CampaignService {
   // In-memory storage for mock data (will be replaced with API calls later)
@@ -22,12 +23,48 @@ class CampaignService {
   private vouchers: VoucherIssued[] = [...mockVouchersIssued];
 
   /**
-   * Get all campaigns
+   * Map external API campaign to internal Campaign interface
+   */
+  private mapExternalCampaign(apiCampaign: any): Campaign {
+    return {
+      id: apiCampaign.id.toString(), // Convert number to string
+      name: apiCampaign.name,
+      code: apiCampaign.code,
+      value: apiCampaign.price, // API uses 'price', we use 'value'
+      description: apiCampaign.name, // Use name as description for now
+      validity_days: apiCampaign.expiretime,
+      status: apiCampaign.isactive ? 'active' : 'inactive',
+      created_at: apiCampaign.startdate,
+      updated_at: apiCampaign.enddate,
+    };
+  }
+
+  /**
+   * Get all campaigns - Fetches from external API
    */
   async getAllCampaigns(): Promise<Campaign[]> {
-    // Simulate API delay
-    await this.delay(300);
-    return this.campaigns; // Return all campaigns (both active and inactive)
+    try {
+      // Try to fetch from external API
+      const response = await externalApiService.fetchActiveCampaigns();
+
+      if (response.success && response.data.length > 0) {
+        // Map external API data to internal Campaign interface
+        const campaigns = response.data.map(apiCampaign => this.mapExternalCampaign(apiCampaign));
+
+        // Update local cache
+        this.campaigns = campaigns;
+
+        return campaigns;
+      } else {
+        // Fallback to mock data if API returns empty
+        console.warn('External API returned empty data, using mock data');
+        return this.campaigns;
+      }
+    } catch (error) {
+      // Fallback to mock data on error
+      console.error('Error fetching campaigns from external API, using mock data:', error);
+      return this.campaigns;
+    }
   }
 
   /**
