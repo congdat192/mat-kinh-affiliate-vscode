@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 // Landing Pages
 import HomePage from '@/pages/landing/HomePage';
 import AffiliateProgramPage from '@/pages/landing/AffiliateProgramPage';
-import VoucherPage from '@/pages/landing/VoucherPage';
+import ClaimVoucherPage from '@/pages/landing/ClaimVoucherPage';
 
 // F0 Layout
 import F0Layout from '@/components/layout/F0Layout';
@@ -34,6 +34,8 @@ import OrdersPage from '@/pages/admin/OrdersPage';
 import CommissionsPage from '@/pages/admin/CommissionsPage';
 import AdminWithdrawalsPage from '@/pages/admin/WithdrawalsPage';
 import VouchersPage from '@/pages/admin/VouchersPage';
+import CampaignsPage from '@/pages/admin/CampaignsPage';
+import F0AssignmentsPage from '@/pages/admin/F0AssignmentsPage';
 import ReportsPage from '@/pages/admin/ReportsPage';
 import SettingsPage from '@/pages/admin/SettingsPage';
 import AdminsPage from '@/pages/admin/AdminsPage';
@@ -45,7 +47,7 @@ function App() {
         {/* Landing Pages */}
         <Route path="/" element={<HomePage />} />
         <Route path="/affiliate-program" element={<AffiliateProgramPage />} />
-        <Route path="/voucher" element={<VoucherPage />} />
+        <Route path="/claim-voucher" element={<ClaimVoucherPage />} />
 
         {/* F0 Auth Pages (No Layout) */}
         <Route path="/f0/auth/login" element={<LoginPage />} />
@@ -73,6 +75,8 @@ function App() {
           <Route path="commissions" element={<CommissionsPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
           <Route path="vouchers" element={<VouchersPage />} />
+          <Route path="campaigns" element={<CampaignsPage />} />
+          <Route path="f0-assignments" element={<F0AssignmentsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admins" element={<AdminsPage />} />
