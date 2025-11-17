@@ -40,30 +40,38 @@ class CampaignService {
   }
 
   /**
-   * Get all campaigns - Fetches from external API
+   * Get all campaigns - Returns local campaigns only
    */
   async getAllCampaigns(): Promise<Campaign[]> {
+    await this.delay(300);
+    return this.campaigns.filter((c) => c.status === 'active');
+  }
+
+  /**
+   * Fetch external campaigns for selection in Create Campaign modal
+   */
+  async fetchExternalCampaignsForSelection(): Promise<Array<{
+    id: number;
+    code: string;
+    name: string;
+    price: number;
+    expiretime: number;
+    startdate: string;
+    enddate: string;
+    isactive: boolean;
+  }>> {
     try {
-      // Try to fetch from external API
       const response = await externalApiService.fetchActiveCampaigns();
 
       if (response.success && response.data.length > 0) {
-        // Map external API data to internal Campaign interface
-        const campaigns = response.data.map(apiCampaign => this.mapExternalCampaign(apiCampaign));
-
-        // Update local cache
-        this.campaigns = campaigns;
-
-        return campaigns;
+        return response.data;
       } else {
-        // Fallback to mock data if API returns empty
-        console.warn('External API returned empty data, using mock data');
-        return this.campaigns;
+        console.warn('External API returned empty data');
+        return [];
       }
     } catch (error) {
-      // Fallback to mock data on error
-      console.error('Error fetching campaigns from external API, using mock data:', error);
-      return this.campaigns;
+      console.error('Error fetching external campaigns:', error);
+      return [];
     }
   }
 
@@ -88,6 +96,7 @@ class CampaignService {
       value: request.value,
       description: request.description,
       validity_days: request.validity_days,
+      external_campaign_id: request.external_campaign_id,
       status: 'active',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -206,8 +215,6 @@ class CampaignService {
    * Issue voucher to F1
    */
   async issueVoucher(request: IssueVoucherRequest): Promise<VoucherIssued> {
-    await this.delay(500);
-
     const campaign = await this.getCampaignById(request.campaign_id);
     if (!campaign) {
       throw new Error('Campaign not found');
@@ -223,10 +230,38 @@ class CampaignService {
       throw new Error('F0 does not have access to this campaign');
     }
 
-    const voucherCode = generateVoucherCode();
-    const issuedAt = new Date();
-    const expiresAt = new Date(issuedAt);
-    expiresAt.setDate(expiresAt.getDate() + campaign.validity_days);
+    // Issue voucher via external API if campaign has external_campaign_id
+    let voucherCode: string;
+    let issuedAt: Date;
+    let expiresAt: Date;
+
+    if (campaign.external_campaign_id) {
+      try {
+        // Get F0 phone from F0 code (in real app, fetch from F0 database)
+        const f0Phone = request.f0_code.replace('F0-', '09'); // Mock conversion for now
+
+        const externalResponse = await externalApiService.issueVoucher({
+          campaign_id: campaign.external_campaign_id,
+          creator_phone: f0Phone,
+          recipient_phone: request.f1_phone,
+          customer_source: request.issued_via === 'direct' ? 'direct' : 'link',
+          customer_type: 'new', // TODO: Check customer status via customer check API
+        });
+
+        voucherCode = externalResponse.code;
+        issuedAt = new Date(externalResponse.created_at);
+        expiresAt = new Date(externalResponse.expired_at);
+      } catch (error) {
+        console.error('Error issuing voucher via external API:', error);
+        throw new Error('Failed to issue voucher via external API');
+      }
+    } else {
+      // Fallback to mock voucher generation if no external campaign ID
+      voucherCode = generateVoucherCode();
+      issuedAt = new Date();
+      expiresAt = new Date(issuedAt);
+      expiresAt.setDate(expiresAt.getDate() + campaign.validity_days);
+    }
 
     const newVoucher: VoucherIssued = {
       id: `voucher-${Date.now()}`,

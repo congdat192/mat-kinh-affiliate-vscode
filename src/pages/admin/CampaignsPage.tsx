@@ -11,6 +11,7 @@ import {
   DollarSign,
   Calendar,
   FileText,
+  Check,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -44,6 +45,20 @@ const CampaignsPage = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // External campaigns state
+  const [externalCampaigns, setExternalCampaigns] = useState<Array<{
+    id: number;
+    code: string;
+    name: string;
+    price: number;
+    expiretime: number;
+    startdate: string;
+    enddate: string;
+    isactive: boolean;
+  }>>([]);
+  const [selectedExternalCampaign, setSelectedExternalCampaign] = useState<number | null>(null);
+  const [isLoadingExternalCampaigns, setIsLoadingExternalCampaigns] = useState(false);
 
   // Form state for create/edit
   const [formData, setFormData] = useState<CreateCampaignRequest>({
@@ -105,6 +120,19 @@ const CampaignsPage = () => {
     setStatusFilter('all');
   };
 
+  const loadExternalCampaigns = async () => {
+    setIsLoadingExternalCampaigns(true);
+    try {
+      const data = await campaignService.fetchExternalCampaignsForSelection();
+      setExternalCampaigns(data);
+    } catch (error) {
+      console.error('Error loading external campaigns:', error);
+      alert('Lỗi khi tải danh sách campaigns từ hệ thống external. Vui lòng kiểm tra cấu hình OAuth token.');
+    } finally {
+      setIsLoadingExternalCampaigns(false);
+    }
+  };
+
   const handleOpenCreateModal = () => {
     setFormData({
       name: '',
@@ -113,7 +141,25 @@ const CampaignsPage = () => {
       description: '',
       validity_days: 30,
     });
+    setSelectedExternalCampaign(null);
     setShowCreateModal(true);
+    // Load external campaigns when modal opens
+    loadExternalCampaigns();
+  };
+
+  const handleSelectExternalCampaign = (campaignId: number) => {
+    setSelectedExternalCampaign(campaignId);
+    const campaign = externalCampaigns.find(c => c.id === campaignId);
+    if (campaign) {
+      setFormData({
+        name: campaign.name,
+        code: campaign.code,
+        value: campaign.price,
+        description: campaign.name, // Use name as description
+        validity_days: campaign.expiretime,
+        external_campaign_id: campaign.id,
+      });
+    }
   };
 
   const handleOpenEditModal = (campaign: Campaign) => {
@@ -502,109 +548,312 @@ const CampaignsPage = () => {
 
       {/* Create Campaign Modal */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="max-w-md" onClose={() => setShowCreateModal(false)}>
-          <DialogHeader>
-            <DialogTitle>Tạo Campaign Mới</DialogTitle>
-            <DialogDescription>
-              Tạo chiến dịch voucher khuyến mãi mới
-            </DialogDescription>
+        <DialogContent className="max-w-2xl" onClose={() => setShowCreateModal(false)}>
+          <DialogHeader className="border-b border-gray-200 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-100 p-3 rounded-lg">
+                <Gift className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold text-gray-900">Tạo Campaign Mới</DialogTitle>
+                <DialogDescription className="text-sm text-gray-600 mt-1">
+                  Chọn campaign từ KiotViet hoặc tạo thủ công
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-4">
-            {/* Name */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Tên Campaign <span className="text-red-500">*</span>
-              </label>
+          {isLoadingExternalCampaigns ? (
+            <div className="flex flex-col items-center justify-center py-16 space-y-4">
               <div className="relative">
-                <Gift className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="VD: Voucher 200K"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="pl-10"
-                />
+                <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              </div>
+              <div className="text-center">
+                <p className="text-gray-700 font-medium text-base">Đang tải danh sách campaigns...</p>
+                <p className="text-sm text-gray-500 mt-1">Đang kết nối với hệ thống KiotViet</p>
               </div>
             </div>
-
-            {/* Code */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Mã Code <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Tag className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="VD: VOUCHER200K"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                  className="pl-10 uppercase"
-                />
+          ) : (
+            <div className="space-y-5 py-4 max-h-[70vh] overflow-y-auto">
+              {/* External Campaign Selector */}
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-5 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="bg-white p-2.5 rounded-lg shadow-sm">
+                    <Tag className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-base font-bold text-gray-800 mb-3 block flex items-center gap-2">
+                      <span>Đồng bộ từ KiotViet</span>
+                      {selectedExternalCampaign && (
+                        <Badge className="bg-green-100 text-green-700 border-green-300">
+                          <Check className="w-3 h-3 mr-1" />
+                          Đã chọn
+                        </Badge>
+                      )}
+                    </label>
+                    {externalCampaigns.length === 0 ? (
+                      <div className="text-sm text-amber-800 bg-amber-50 rounded-lg px-4 py-3 border border-amber-300">
+                        <p className="font-medium">Không tìm thấy campaigns từ KiotViet</p>
+                        <p className="text-xs mt-1">Bạn có thể tạo campaign thủ công bên dưới</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex gap-2">
+                          <Select
+                            value={selectedExternalCampaign?.toString() || ''}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value) {
+                                handleSelectExternalCampaign(parseInt(value));
+                              } else {
+                                setSelectedExternalCampaign(null);
+                                setFormData({
+                                  name: '',
+                                  code: '',
+                                  value: 0,
+                                  description: '',
+                                  validity_days: 30,
+                                });
+                              }
+                            }}
+                            className="bg-white shadow-sm flex-1"
+                          >
+                            <option value="">-- Chọn campaign từ KiotViet --</option>
+                            {externalCampaigns.map((campaign) => (
+                              <option key={campaign.id} value={campaign.id}>
+                                {campaign.name} ({campaign.price.toLocaleString('vi-VN')} VNĐ)
+                              </option>
+                            ))}
+                          </Select>
+                          {selectedExternalCampaign && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedExternalCampaign(null);
+                                setFormData({
+                                  name: '',
+                                  code: '',
+                                  value: 0,
+                                  description: '',
+                                  validity_days: 30,
+                                });
+                              }}
+                              className="shrink-0"
+                            >
+                              Hủy chọn
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-xs text-blue-700 mt-2 flex items-center gap-1">
+                          <span className="w-1 h-1 bg-blue-600 rounded-full"></span>
+                          Thông tin sẽ tự động điền khi bạn chọn campaign
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* Value */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Giá Trị (VNĐ) <span className="text-red-500">*</span>
-              </label>
+              {/* Divider with OR */}
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="number"
-                  placeholder="VD: 200000"
-                  value={formData.value || ''}
-                  onChange={(e) => setFormData({ ...formData, value: parseInt(e.target.value) || 0 })}
-                  className="pl-10"
-                  min={0}
-                />
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-4 bg-white text-gray-500 font-medium">
+                    {selectedExternalCampaign ? 'Thông tin từ KiotViet' : 'Hoặc tạo thủ công'}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            {/* Validity Days */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Thời Hạn (ngày) <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <Input
-                  type="number"
-                  placeholder="VD: 30"
-                  value={formData.validity_days}
-                  onChange={(e) => setFormData({ ...formData, validity_days: parseInt(e.target.value) || 30 })}
-                  className="pl-10"
-                  min={1}
-                />
-              </div>
-            </div>
+              {/* Display mode when external campaign selected */}
+              {selectedExternalCampaign !== null ? (
+                <div className="bg-gradient-to-br from-gray-50 to-slate-50 border-2 border-gray-200 rounded-xl p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-base font-bold text-gray-800">Chi tiết Campaign</h3>
+                    <Badge className="bg-blue-100 text-blue-700 border-blue-300">
+                      Từ KiotViet
+                    </Badge>
+                  </div>
 
-            {/* Description */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Mô Tả
-              </label>
-              <div className="relative">
-                <FileText className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                <textarea
-                  placeholder="Mô tả chi tiết về campaign..."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[80px]"
-                />
-              </div>
-            </div>
-          </div>
+                  {/* Name */}
+                  <div className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-start gap-3">
+                      <Gift className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-600 mb-1">Tên Campaign</p>
+                        <p className="text-sm text-gray-900 font-medium break-words">{formData.name}</p>
+                      </div>
+                    </div>
+                  </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+                  {/* Code */}
+                  <div className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-start gap-3">
+                      <Tag className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-600 mb-1">Mã đợt phát hành</p>
+                        <p className="text-sm text-gray-900 font-mono font-semibold">{formData.code}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Value */}
+                    <div className="bg-white rounded-lg p-3 border border-gray-200">
+                      <div className="flex items-start gap-2">
+                        <DollarSign className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-600 mb-1">Giá trị</p>
+                          <p className="text-sm text-green-700 font-bold">
+                            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(formData.value)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Validity Days */}
+                    <div className="bg-white rounded-lg p-3 border border-gray-200">
+                      <div className="flex items-start gap-2">
+                        <Calendar className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-gray-600 mb-1">Thời hạn</p>
+                          <p className="text-sm text-gray-900 font-semibold">{formData.validity_days} ngày</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-start gap-3">
+                      <FileText className="w-5 h-5 text-gray-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-600 mb-1">Mô tả</p>
+                        <p className="text-sm text-gray-700 break-words">{formData.description || 'Không có mô tả'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Form Fields for manual creation */
+                <div className="bg-gradient-to-br from-gray-50 to-slate-50 border-2 border-gray-200 rounded-xl p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-base font-bold text-gray-800">Tạo Campaign Thủ Công</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Name */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <Gift className="w-4 h-4 text-blue-600" />
+                        Tên Campaign <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        type="text"
+                        placeholder="VD: Voucher 200K cho khách hàng mới"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {/* Code */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <Tag className="w-4 h-4 text-purple-600" />
+                        Mã Campaign <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        type="text"
+                        placeholder="VD: VOUCHER200K"
+                        value={formData.code}
+                        onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                        className="uppercase bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 font-mono"
+                      />
+                    </div>
+
+                    {/* Value */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-green-600" />
+                        Giá Trị (VNĐ) <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        type="number"
+                        placeholder="200000"
+                        value={formData.value || ''}
+                        onChange={(e) => setFormData({ ...formData, value: parseInt(e.target.value) || 0 })}
+                        className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                        min={0}
+                        step={10000}
+                      />
+                      <p className="text-xs text-gray-500">Nhập số tiền giảm giá (VNĐ)</p>
+                    </div>
+
+                    {/* Validity Days */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-orange-600" />
+                        Thời Hạn (ngày) <span className="text-red-500">*</span>
+                      </label>
+                      <Input
+                        type="number"
+                        placeholder="30"
+                        value={formData.validity_days}
+                        onChange={(e) => setFormData({ ...formData, validity_days: parseInt(e.target.value) || 30 })}
+                        className="bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                        min={1}
+                        max={365}
+                      />
+                      <p className="text-xs text-gray-500">Số ngày voucher có hiệu lực</p>
+                    </div>
+                  </div>
+
+                  {/* Description - Full Width */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-gray-600" />
+                      Mô Tả
+                    </label>
+                    <textarea
+                      placeholder="Mô tả chi tiết về điều kiện áp dụng, quyền lợi của campaign..."
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white min-h-[100px] resize-none"
+                    />
+                    <p className="text-xs text-gray-500">Thông tin này sẽ hiển thị cho F0 và khách hàng</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="border-t border-gray-200 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateModal(false)}
+              className="min-w-[100px]"
+            >
               Hủy
             </Button>
-            <Button onClick={handleCreateCampaign}>
-              <Plus className="w-4 h-4 mr-2" />
-              Tạo Campaign
+            <Button
+              onClick={handleCreateCampaign}
+              disabled={isLoadingExternalCampaigns}
+              className="min-w-[140px]"
+            >
+              {isLoadingExternalCampaigns ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                  Đang tải...
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Tạo Campaign
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
