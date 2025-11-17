@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 // Landing Pages
 import HomePage from '@/pages/landing/HomePage';
 import AffiliateProgramPage from '@/pages/landing/AffiliateProgramPage';
-import VoucherPage from '@/pages/landing/VoucherPage';
 import ClaimVoucherPage from '@/pages/landing/ClaimVoucherPage';
 
 // F0 Layout
@@ -48,7 +47,6 @@ function App() {
         {/* Landing Pages */}
         <Route path="/" element={<HomePage />} />
         <Route path="/affiliate-program" element={<AffiliateProgramPage />} />
-        <Route path="/voucher" element={<VoucherPage />} />
         <Route path="/claim-voucher" element={<ClaimVoucherPage />} />
 
         {/* F0 Auth Pages (No Layout) */}
