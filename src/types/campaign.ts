@@ -8,6 +8,7 @@ export interface Campaign {
   description: string;
   validity_days: number; // 30 ngày
   status: 'active' | 'inactive';
+  external_campaign_id?: number; // ID from external KiotViet API
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +46,7 @@ export interface CreateCampaignRequest {
   value: number;
   description: string;
   validity_days: number;
+  external_campaign_id?: number; // ID from external KiotViet API
 }
 
 export interface UpdateCampaignRequest {
