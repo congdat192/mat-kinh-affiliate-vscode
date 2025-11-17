@@ -2,10 +2,8 @@
 const TOKEN_STORAGE_KEY = 'api_access_token';
 const TOKEN_EXPIRY_KEY = 'api_token_expiry';
 
-// Use proxy in development to avoid CORS issues
-const API_BASE_URL = import.meta.env.DEV
-  ? '/api'
-  : 'https://kcirpjxbjqagrqrjfldu.supabase.co/functions/v1';
+// Use proxy for both development and production to avoid CORS issues
+const API_BASE_URL = '/api';
 
 interface TokenResponse {
   success: boolean;
