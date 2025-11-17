@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Link as LinkIcon,
   Copy,
@@ -7,18 +7,19 @@ import {
   Mail,
   MessageCircle,
   Check,
-  Calendar,
   TrendingUp,
   Eye,
   Trash2,
   ExternalLink,
+  Loader2,
+  Gift,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -28,6 +29,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { authService } from '@/services/authService';
+import { campaignService } from '@/services/campaignService';
+import type { Campaign } from '@/types/campaign';
 
 // Mock data for recently created links
 const mockRecentLinks = [
@@ -84,48 +88,47 @@ const mockRecentLinks = [
 ];
 
 const CreateReferralLinkPage = () => {
-  const [campaignName, setCampaignName] = useState('');
-  const [linkCode, setLinkCode] = useState('');
-  const [description, setDescription] = useState('');
-  const [expiryDate, setExpiryDate] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState('');
   const [generatedLink, setGeneratedLink] = useState('');
   const [copied, setCopied] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [f0Code, setF0Code] = useState('');
 
-  // Generate random code
-  const generateRandomCode = () => {
-    const characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-      result += characters.charAt(Math.floor(Math.random() * characters.length));
+  // Load campaigns and F0 code on mount
+  useEffect(() => {
+    loadCampaigns();
+    const code = authService.getF0Code();
+    setF0Code(code);
+  }, []);
+
+  const loadCampaigns = async () => {
+    setIsLoadingCampaigns(true);
+    try {
+      const f0Code = authService.getF0Code();
+      const assignedCampaigns = await campaignService.getCampaignsForF0(f0Code, 'link');
+      setCampaigns(assignedCampaigns);
+    } catch (error) {
+      console.error('Error loading campaigns:', error);
+      alert('Lỗi khi tải danh sách campaigns');
+    } finally {
+      setIsLoadingCampaigns(false);
     }
-    return result;
   };
 
-  // Handle form submission
-  const handleCreateLink = async () => {
-    if (!campaignName.trim()) {
+  // Generate ref link
+  const handleCreateLink = () => {
+    if (!selectedCampaign) {
+      alert('Vui lòng chọn campaign');
       return;
     }
 
-    setIsCreating(true);
-    setShowSuccess(false);
-
-    // Simulate API call
-    setTimeout(() => {
-      const code = linkCode.trim() || generateRandomCode();
-      const link = `https://matkinhaffiliate.vn/ref/${code}`;
-      setGeneratedLink(link);
-      setIsCreating(false);
-      setShowSuccess(true);
-
-      // Reset form
-      setCampaignName('');
-      setLinkCode('');
-      setDescription('');
-      setExpiryDate('');
-    }, 1000);
+    // Generate link with F0 code as ref
+    const baseUrl = window.location.origin;
+    const link = `${baseUrl}/claim-voucher?ref=${f0Code}&campaign=${selectedCampaign}`;
+    setGeneratedLink(link);
+    setShowSuccess(true);
   };
 
   // Copy link to clipboard
@@ -210,84 +213,66 @@ const CreateReferralLinkPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Campaign Name */}
+                {/* F0 Code Display */}
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                  <Label className="text-sm text-blue-700 mb-2 block">Mã giới thiệu của bạn</Label>
+                  <div className="flex items-center gap-2">
+                    <code className="text-lg font-bold text-blue-900">{f0Code}</code>
+                  </div>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Link sẽ sử dụng mã này để theo dõi khách hàng giới thiệu
+                  </p>
+                </div>
+
+                {/* Campaign Selection */}
                 <div className="space-y-2">
-                  <Label htmlFor="campaignName">
-                    Tên chiến dịch <span className="text-red-500">*</span>
+                  <Label htmlFor="campaign">
+                    Chọn Campaign <span className="text-red-500">*</span>
                   </Label>
-                  <Input
-                    id="campaignName"
-                    placeholder="VD: Khuyến mãi Tết 2025"
-                    value={campaignName}
-                    onChange={(e) => setCampaignName(e.target.value)}
-                  />
-                  <p className="text-xs text-gray-500">
-                    Tên chiến dịch giúp bạn dễ dàng quản lý và phân biệt các link
-                  </p>
-                </div>
-
-                {/* Link Code */}
-                <div className="space-y-2">
-                  <Label htmlFor="linkCode">Mã link (tùy chọn)</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="linkCode"
-                      placeholder="VD: tet2025"
-                      value={linkCode}
-                      onChange={(e) => setLinkCode(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                    />
-                    <Button
-                      variant="outline"
-                      onClick={() => setLinkCode(generateRandomCode())}
-                    >
-                      Tạo ngẫu nhiên
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Để trống để hệ thống tự động tạo mã ngẫu nhiên
-                  </p>
-                </div>
-
-                {/* Description */}
-                <div className="space-y-2">
-                  <Label htmlFor="description">Mô tả (tùy chọn)</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Ghi chú về chiến dịch, đối tượng mục tiêu..."
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-
-                {/* Expiry Date */}
-                <div className="space-y-2">
-                  <Label htmlFor="expiryDate">Ngày hết hạn (tùy chọn)</Label>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="expiryDate"
-                        type="date"
-                        className="pl-10"
-                        value={expiryDate}
-                        onChange={(e) => setExpiryDate(e.target.value)}
-                        min={new Date().toISOString().split('T')[0]}
-                      />
+                  {isLoadingCampaigns ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Đang tải danh sách campaigns...
                     </div>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    Link sẽ tự động vô hiệu hóa sau ngày này
-                  </p>
+                  ) : campaigns.length === 0 ? (
+                    <Alert variant="warning">
+                      <AlertDescription>
+                        Bạn chưa được gán campaign nào cho phương thức link giới thiệu. Vui lòng liên hệ admin để được hỗ trợ.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <>
+                      <div className="relative">
+                        <Gift className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <Select
+                          id="campaign"
+                          value={selectedCampaign}
+                          onChange={(e) => setSelectedCampaign(e.target.value)}
+                          className="pl-10"
+                        >
+                          <option value="">-- Chọn Campaign --</option>
+                          {campaigns.map((campaign) => (
+                            <option key={campaign.id} value={campaign.id}>
+                              {campaign.name} - {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(campaign.value)}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Chọn campaign để tạo link giới thiệu cho khách hàng của bạn
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 {/* Create Button */}
                 <Button
                   className="w-full"
                   onClick={handleCreateLink}
-                  disabled={isCreating || !campaignName.trim()}
+                  disabled={!selectedCampaign || campaigns.length === 0}
                 >
-                  {isCreating ? 'Đang tạo...' : 'Tạo Link Giới Thiệu'}
+                  <LinkIcon className="w-4 h-4 mr-2" />
+                  Tạo Link Giới Thiệu
                 </Button>
               </CardContent>
             </Card>
