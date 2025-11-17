@@ -27,7 +27,7 @@ class CampaignService {
   async getAllCampaigns(): Promise<Campaign[]> {
     // Simulate API delay
     await this.delay(300);
-    return this.campaigns.filter((c) => c.status === 'active');
+    return this.campaigns; // Return all campaigns (both active and inactive)
   }
 
   /**
