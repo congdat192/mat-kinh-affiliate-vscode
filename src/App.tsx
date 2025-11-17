@@ -34,6 +34,7 @@ import OrdersPage from '@/pages/admin/OrdersPage';
 import CommissionsPage from '@/pages/admin/CommissionsPage';
 import AdminWithdrawalsPage from '@/pages/admin/WithdrawalsPage';
 import VouchersPage from '@/pages/admin/VouchersPage';
+import CampaignsPage from '@/pages/admin/CampaignsPage';
 import ReportsPage from '@/pages/admin/ReportsPage';
 import SettingsPage from '@/pages/admin/SettingsPage';
 import AdminsPage from '@/pages/admin/AdminsPage';
@@ -73,6 +74,7 @@ function App() {
           <Route path="commissions" element={<CommissionsPage />} />
           <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
           <Route path="vouchers" element={<VouchersPage />} />
+          <Route path="campaigns" element={<CampaignsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admins" element={<AdminsPage />} />
