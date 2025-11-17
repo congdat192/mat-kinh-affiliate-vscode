@@ -22,7 +22,7 @@ export default function HomePage() {
               Không cần vốn, không cần kinh nghiệm!
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link to="/f0/signup">
+              <Link to="/f0/auth/signup">
                 <Button size="lg" className="w-full sm:w-auto">
                   Đăng Ký Ngay <ArrowRight className="ml-2 h-5 w-5" />
                 </Button>
@@ -250,7 +250,7 @@ export default function HomePage() {
           <p className="text-xl text-primary-50 mb-8 max-w-2xl mx-auto">
             Tham gia hàng trăm đối tác đang kiếm thu nhập thụ động mỗi ngày với {BRAND_NAME}
           </p>
-          <Link to="/f0/signup">
+          <Link to="/f0/auth/signup">
             <Button size="lg" variant="outline" className="bg-white text-primary-500 hover:bg-gray-100">
               Đăng Ký Miễn Phí Ngay <ArrowRight className="ml-2 h-5 w-5" />
             </Button>

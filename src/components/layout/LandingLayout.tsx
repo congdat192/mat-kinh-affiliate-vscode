@@ -31,12 +31,12 @@ export default function LandingLayout({ children }: LandingLayoutProps) {
                 Nhận Voucher
               </Link>
               <div className="flex items-center space-x-3">
-                <Link to="/f0/login">
+                <Link to="/f0/auth/login">
                   <Button variant="outline" size="sm">
                     Đăng Nhập
                   </Button>
                 </Link>
-                <Link to="/f0/signup">
+                <Link to="/f0/auth/signup">
                   <Button size="sm">
                     Đăng Ký Ngay
                   </Button>
