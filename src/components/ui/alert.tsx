@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import { AlertCircle, CheckCircle, Info, XCircle } from 'lucide-react';
 
 export interface AlertProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'success' | 'warning' | 'error' | 'info';
+  variant?: 'default' | 'success' | 'warning' | 'error' | 'info' | 'danger';
 }
 
 const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
@@ -14,6 +14,7 @@ const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
       warning: AlertCircle,
       error: XCircle,
       info: Info,
+      danger: XCircle,
     };
 
     const Icon = icons[variant];
@@ -28,7 +29,7 @@ const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
             'bg-gray-50 border-gray-200 text-gray-800': variant === 'default',
             'bg-green-50 border-green-200 text-green-800': variant === 'success',
             'bg-yellow-50 border-yellow-200 text-yellow-800': variant === 'warning',
-            'bg-red-50 border-red-200 text-red-800': variant === 'error',
+            'bg-red-50 border-red-200 text-red-800': variant === 'error' || variant === 'danger',
             'bg-blue-50 border-blue-200 text-blue-800': variant === 'info',
           },
           className
