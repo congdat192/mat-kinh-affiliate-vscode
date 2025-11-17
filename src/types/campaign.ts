@@ -47,6 +47,15 @@ export interface CreateCampaignRequest {
   validity_days: number;
 }
 
+export interface UpdateCampaignRequest {
+  name: string;
+  code: string;
+  value: number;
+  description: string;
+  validity_days: number;
+  status: 'active' | 'inactive';
+}
+
 export interface AssignCampaignRequest {
   f0_code: string;
   campaign_id: string;

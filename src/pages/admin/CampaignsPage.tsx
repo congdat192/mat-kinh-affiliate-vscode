@@ -161,9 +161,13 @@ const CampaignsPage = () => {
         status: selectedCampaign.status,
       };
       const updatedCampaign = await campaignService.updateCampaign(selectedCampaign.id, updateRequest);
-      setCampaigns(campaigns.map(c => c.id === selectedCampaign.id ? updatedCampaign : c));
-      setShowEditModal(false);
-      alert('Cập nhật campaign thành công!');
+      if (updatedCampaign) {
+        setCampaigns(campaigns.map(c => c.id === selectedCampaign.id ? updatedCampaign : c));
+        setShowEditModal(false);
+        alert('Cập nhật campaign thành công!');
+      } else {
+        alert('Không tìm thấy campaign');
+      }
     } catch (error) {
       console.error('Error updating campaign:', error);
       alert('Lỗi khi cập nhật campaign');
@@ -185,8 +189,12 @@ const CampaignsPage = () => {
           status: newStatus,
         };
         const updatedCampaign = await campaignService.updateCampaign(campaign.id, updateRequest);
-        setCampaigns(campaigns.map(c => c.id === campaign.id ? updatedCampaign : c));
-        alert(`Đã ${action} campaign thành công!`);
+        if (updatedCampaign) {
+          setCampaigns(campaigns.map(c => c.id === campaign.id ? updatedCampaign : c));
+          alert(`Đã ${action} campaign thành công!`);
+        } else {
+          alert('Không tìm thấy campaign');
+        }
       } catch (error) {
         console.error('Error toggling campaign status:', error);
         alert('Lỗi khi cập nhật trạng thái campaign');
