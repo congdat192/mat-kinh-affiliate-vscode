@@ -20,13 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
@@ -500,19 +494,15 @@ export default function AdminsPage() {
             <div className="grid gap-2">
               <Label htmlFor="role">Vai Trò</Label>
               <Select
+                id="role"
                 value={formData.role}
-                onValueChange={(value: 'Super Admin' | 'Admin' | 'Moderator') =>
-                  setFormData({ ...formData, role: value, permissions: value === 'Super Admin' ? ['all'] : formData.permissions })
+                onChange={(e) =>
+                  setFormData({ ...formData, role: e.target.value as 'Super Admin' | 'Admin' | 'Moderator', permissions: e.target.value === 'Super Admin' ? ['all'] : formData.permissions })
                 }
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Super Admin">Super Admin</SelectItem>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Moderator">Moderator</SelectItem>
-                </SelectContent>
+                <option value="Super Admin">Super Admin</option>
+                <option value="Admin">Admin</option>
+                <option value="Moderator">Moderator</option>
               </Select>
             </div>
 
@@ -525,7 +515,7 @@ export default function AdminsPage() {
                       <Checkbox
                         id={permission.id}
                         checked={formData.permissions.includes(permission.id)}
-                        onCheckedChange={() => togglePermission(permission.id)}
+                        onChange={() => togglePermission(permission.id)}
                       />
                       <label
                         htmlFor={permission.id}
