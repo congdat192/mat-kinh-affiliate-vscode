@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   UserPlus,
   Phone,
@@ -24,14 +24,9 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Select } from '@/components/ui/select';
 import { customerService, type CheckCustomerResult } from '@/services/customerService';
-
-// Mock data for referral links
-const mockReferralLinks = [
-  { id: 1, name: 'Chiến dịch Tết 2025', code: 'tet2025' },
-  { id: 2, name: 'Khuyến mãi Black Friday', code: 'blackfriday' },
-  { id: 3, name: 'Ưu đãi sinh viên', code: 'student' },
-  { id: 4, name: 'Khám mắt miễn phí', code: 'freeeye' },
-];
+import { authService } from '@/services/authService';
+import { campaignService } from '@/services/campaignService';
+import type { Campaign } from '@/types/campaign';
 
 // Mock data for recent referrals
 const mockRecentReferrals = [
@@ -93,7 +88,9 @@ const ReferCustomerPage = () => {
   const [notes, setNotes] = useState('');
 
   // Step 2: Send Voucher
-  const [selectedLink, setSelectedLink] = useState('');
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState('');
   const [sendMethod, setSendMethod] = useState<'sms' | 'email' | 'both'>('sms');
   const [isSending, setIsSending] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -105,6 +102,25 @@ const ReferCustomerPage = () => {
   // Customer check states
   const [isCheckingCustomer, setIsCheckingCustomer] = useState(false);
   const [customerCheckResult, setCustomerCheckResult] = useState<CheckCustomerResult | null>(null);
+
+  // Load campaigns for current F0 on mount
+  useEffect(() => {
+    loadCampaigns();
+  }, []);
+
+  const loadCampaigns = async () => {
+    setIsLoadingCampaigns(true);
+    try {
+      const f0Code = authService.getF0Code();
+      const assignedCampaigns = await campaignService.getCampaignsForF0(f0Code, 'direct');
+      setCampaigns(assignedCampaigns);
+    } catch (error) {
+      console.error('Error loading campaigns:', error);
+      alert('Lỗi khi tải danh sách campaigns');
+    } finally {
+      setIsLoadingCampaigns(false);
+    }
+  };
 
   // Validate phone number (Vietnamese format)
   const validatePhone = (phone: string): boolean => {
@@ -191,8 +207,8 @@ const ReferCustomerPage = () => {
   const handleSendVoucher = async () => {
     const newErrors: Record<string, string> = {};
 
-    if (!selectedLink) {
-      newErrors.selectedLink = 'Vui lòng chọn link giới thiệu';
+    if (!selectedCampaign) {
+      newErrors.selectedCampaign = 'Vui lòng chọn campaign';
     }
 
     if (sendMethod === 'email' && !email) {
@@ -208,13 +224,25 @@ const ReferCustomerPage = () => {
     if (Object.keys(newErrors).length === 0) {
       setIsSending(true);
 
-      // Simulate API call
-      setTimeout(() => {
-        const code = `VOUCHER${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-        setVoucherCode(code);
-        setIsSending(false);
+      try {
+        const f0Code = authService.getF0Code();
+        const issuedVoucher = await campaignService.issueVoucher({
+          campaign_id: selectedCampaign,
+          f0_code: f0Code,
+          f1_phone: phoneNumber,
+          f1_name: fullName,
+          f1_email: email,
+          issued_via: 'direct',
+        });
+
+        setVoucherCode(issuedVoucher.voucher_code);
         setIsSuccess(true);
-      }, 2000);
+      } catch (error) {
+        console.error('Error issuing voucher:', error);
+        alert('Lỗi khi tạo voucher. Vui lòng thử lại.');
+      } finally {
+        setIsSending(false);
+      }
     }
   };
 
@@ -225,7 +253,7 @@ const ReferCustomerPage = () => {
     setPhoneNumber('');
     setEmail('');
     setNotes('');
-    setSelectedLink('');
+    setSelectedCampaign('');
     setSendMethod('sms');
     setIsSuccess(false);
     setVoucherCode('');
@@ -507,29 +535,44 @@ const ReferCustomerPage = () => {
                     </div>
                   </div>
 
-                  {/* Select Referral Link */}
+                  {/* Select Campaign */}
                   <div className="space-y-2">
-                    <Label htmlFor="referralLink">
-                      Chọn link giới thiệu <span className="text-red-500">*</span>
+                    <Label htmlFor="campaign">
+                      Chọn Campaign <span className="text-red-500">*</span>
                     </Label>
-                    <Select
-                      id="referralLink"
-                      value={selectedLink}
-                      onChange={(e) => {
-                        setSelectedLink(e.target.value);
-                        setErrors({ ...errors, selectedLink: '' });
-                      }}
-                      className={errors.selectedLink ? 'border-red-500' : ''}
-                    >
-                      <option value="">-- Chọn link --</option>
-                      {mockReferralLinks.map((link) => (
-                        <option key={link.id} value={link.code}>
-                          {link.name} ({link.code})
-                        </option>
-                      ))}
-                    </Select>
-                    {errors.selectedLink && (
-                      <p className="text-xs text-red-500">{errors.selectedLink}</p>
+                    {isLoadingCampaigns ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Đang tải danh sách campaigns...
+                      </div>
+                    ) : campaigns.length === 0 ? (
+                      <Alert variant="warning">
+                        <AlertDescription>
+                          Bạn chưa được gán campaign nào cho phương thức giới thiệu trực tiếp. Vui lòng liên hệ admin để được hỗ trợ.
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <>
+                        <Select
+                          id="campaign"
+                          value={selectedCampaign}
+                          onChange={(e) => {
+                            setSelectedCampaign(e.target.value);
+                            setErrors({ ...errors, selectedCampaign: '' });
+                          }}
+                          className={errors.selectedCampaign ? 'border-red-500' : ''}
+                        >
+                          <option value="">-- Chọn Campaign --</option>
+                          {campaigns.map((campaign) => (
+                            <option key={campaign.id} value={campaign.id}>
+                              {campaign.name} - {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(campaign.value)}
+                            </option>
+                          ))}
+                        </Select>
+                        {errors.selectedCampaign && (
+                          <p className="text-xs text-red-500">{errors.selectedCampaign}</p>
+                        )}
+                      </>
                     )}
                   </div>
 
