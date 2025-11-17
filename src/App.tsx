@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import HomePage from '@/pages/landing/HomePage';
 import AffiliateProgramPage from '@/pages/landing/AffiliateProgramPage';
 import VoucherPage from '@/pages/landing/VoucherPage';
+import ClaimVoucherPage from '@/pages/landing/ClaimVoucherPage';
 
 // F0 Layout
 import F0Layout from '@/components/layout/F0Layout';
@@ -48,6 +49,7 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/affiliate-program" element={<AffiliateProgramPage />} />
         <Route path="/voucher" element={<VoucherPage />} />
+        <Route path="/claim-voucher" element={<ClaimVoucherPage />} />
 
         {/* F0 Auth Pages (No Layout) */}
         <Route path="/f0/auth/login" element={<LoginPage />} />
