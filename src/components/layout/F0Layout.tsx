@@ -11,13 +11,15 @@ import {
   Menu,
   X,
   LogOut,
-  ChevronDown
+  ChevronDown,
+  Award
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BRAND_NAME } from '@/lib/constants';
 
 const navigation = [
-  { name: 'Dashboard', href: '/f0/dashboard', icon: LayoutDashboard },
+  { name: 'Dashboard', href: '/f0', icon: LayoutDashboard },
+  { name: 'Thành Tích & Xếp Hạng', href: '/f0/gamification', icon: Award },
   { name: 'Tạo Link Giới Thiệu', href: '/f0/create-link', icon: LinkIcon },
   { name: 'Giới Thiệu Khách Hàng', href: '/f0/refer-customer', icon: UserPlus },
   { name: 'Lịch Sử Giới Thiệu', href: '/f0/referral-history', icon: History },
