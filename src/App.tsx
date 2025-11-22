@@ -22,6 +22,7 @@ import ReferralHistoryPage from '@/pages/f0/ReferralHistoryPage';
 import F0WithdrawalPage from '@/pages/f0/WithdrawalPage';
 import ProfilePage from '@/pages/f0/ProfilePage';
 import NotificationsPage from '@/pages/f0/NotificationsPage';
+import GamificationPage from '@/pages/f0/GamificationPage';
 
 // Admin Layout
 import AdminLayout from '@/components/layout/AdminLayout';
@@ -57,13 +58,14 @@ function App() {
 
         {/* F0 Pages (With Layout) */}
         <Route path="/f0" element={<F0Layout />}>
-          <Route path="dashboard" element={<F0DashboardPage />} />
+          <Route index element={<F0DashboardPage />} />
           <Route path="create-link" element={<CreateReferralLinkPage />} />
           <Route path="refer-customer" element={<ReferCustomerPage />} />
           <Route path="referral-history" element={<ReferralHistoryPage />} />
           <Route path="withdrawal" element={<F0WithdrawalPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="gamification" element={<GamificationPage />} />
         </Route>
 
         {/* Admin Pages (With Layout) */}
