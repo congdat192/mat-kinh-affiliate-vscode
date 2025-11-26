@@ -1,188 +1,211 @@
-# Mắt Kính Tâm Đức - Affiliate Marketing System
+# Mat Kinh Tam Duc - Affiliate Marketing System
 
-Hệ thống quản lý chương trình đối tác (affiliate marketing) cho công ty Mắt Kính Tâm Đức.
+Affiliate partner management system for Mat Kinh Tam Duc eyewear company.
 
-## 🎯 Tổng Quan
+## Overview
 
-Hệ thống bao gồm 3 modules chính:
-- **Landing Pages**: Giới thiệu chương trình và thu hút đối tác
-- **F0 System**: Dashboard và quản lý cho đối tác
-- **Admin System**: Quản trị toàn bộ hệ thống
+The system consists of 3 main modules:
+- **Landing Pages**: Program introduction and partner recruitment
+- **F0 System**: Dashboard and management for partners
+- **Admin System**: Full system administration
 
-## 🚀 Tech Stack
+## Tech Stack
 
-- **Frontend**: React 18 + Vite + TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui
-- **Routing**: React Router v6
-- **State Management**: TanStack Query + Zustand (sẽ thêm)
-- **Backend**: Supabase (sẽ tích hợp)
-- **Deployment**: Vercel
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19 + Vite 7 + TypeScript |
+| Styling | Tailwind CSS + shadcn/ui |
+| Routing | React Router v7 |
+| Database | Supabase (PostgreSQL) |
+| SMS OTP | Vihat |
+| Email | Resend |
+| Deployment | Vercel (planned) |
 
-## 📦 Cài Đặt
+## Installation
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/congdat192/mat-kinh-affiliate-vscode.git
 cd mat-kinh-affiliate-vscode
 
-# Cài đặt dependencies
+# Install dependencies
 npm install
 
-# Chạy development server
+# Start development server
 npm run dev
 
-# Build cho production
+# Build for production
 npm run build
 
 # Preview production build
 npm run preview
 ```
 
-## 🎨 Landing Pages (Đã Hoàn Thành)
+## Environment Variables
 
-### 1. Homepage (/)
-- Hero section với CTA
-- Giới thiệu chương trình đối tác
-- Hệ thống tier (Silver/Gold/Diamond)
-- Cách thức hoạt động
-- Testimonials
-- FAQ section
+Create `.env` file:
 
-### 2. Affiliate Program (/affiliate-program)
-- Chi tiết về chương trình
-- Cơ chế hoa hồng theo tier
-- Quy trình đăng ký
-- Yêu cầu tham gia
-- Hệ thống voucher
+```env
+VITE_SUPABASE_PROJECT_ID=your_project_id
+VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key
+VITE_SUPABASE_URL=your_supabase_url
 
-### 3. Voucher Page (/voucher)
-- Form nhập thông tin nhận voucher
-- Validation số điện thoại
-- Success page với mã voucher
-- FAQ về voucher
+RESEND_API_KEY=your_resend_api_key
+VIHAT_ENCRYPTION_KEY=your_vihat_key
+KIOTVIET_ENCRYPTION_KEY=your_kiotviet_key
+```
 
-## 📋 Roadmap
+## Database Schema
 
-### Phase 1: Landing Pages ✅ (Hoàn Thành)
-- [x] Setup project (Vite + React + TypeScript)
-- [x] Configure Tailwind CSS + shadcn/ui
-- [x] Create layout components
-- [x] Build Homepage
-- [x] Build Affiliate Program page
-- [x] Build Voucher page
+### Schema: `affiliate`
 
-### Phase 2: F0 System (Tiếp Theo)
-- [ ] Authentication pages (Login, Signup, OTP)
-- [ ] Dashboard với statistics
-- [ ] Referral link generator
-- [ ] Customer referral form
-- [ ] Referral history table
-- [ ] Withdrawal requests
-- [ ] Profile management
-- [ ] Notifications
+#### Table: `f0_partners`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| phone | VARCHAR(15) | Phone (unique) |
+| email | VARCHAR(255) | Email (unique) |
+| full_name | VARCHAR(255) | Full name |
+| password_hash | VARCHAR(255) | Hashed password |
+| f0_code | VARCHAR(20) | Auto F0 code (F0-XXXX) |
+| is_active | BOOLEAN | Account active status |
+| is_approved | BOOLEAN | Approval status |
+| created_at | TIMESTAMPTZ | Created date |
+| approved_at | TIMESTAMPTZ | Approved date |
+| approved_by | UUID | Approving admin |
 
-### Phase 3: Admin System
-- [ ] Admin dashboard
-- [ ] F0 management
-- [ ] Approve affiliates
-- [ ] Referral management
-- [ ] Voucher management
-- [ ] Withdrawal processing
-- [ ] Activity logs
-- [ ] System settings
-- [ ] Reporting & analytics
+## Authentication Flow
 
-### Phase 4: Backend Integration
-- [ ] Setup Supabase
-- [ ] Database schema
-- [ ] Row Level Security policies
-- [ ] Authentication flow
-- [ ] API integration
-- [ ] Real-time subscriptions
+```
+Register -> Send OTP (SMS) -> Verify OTP -> Save to DB -> Confirmation email
+                                                              |
+                                Login <- Notification email <- Admin approval
+```
 
-### Phase 5: Deployment
-- [ ] Environment variables
-- [ ] Vercel deployment
-- [ ] Domain configuration
-- [ ] Performance optimization
+### Account Status
 
-## 💰 Hệ Thống Hoa Hồng
+| is_active | is_approved | Result |
+|-----------|-------------|--------|
+| true | true | Normal usage |
+| true | false | Pending approval |
+| false | * | Account locked |
 
-### Silver (0-10 khách/quý)
-- 10% hoa hồng đơn đầu
-- Không có hoa hồng dài hạn
-
-### Gold (11-30 khách/quý)
-- 10% hoa hồng đơn đầu
-- 5% hoa hồng trọn đời
-
-### Diamond (31-50 khách/quý)
-- 10% hoa hồng đơn đầu
-- 8% hoa hồng trọn đời
-
-## 🎁 Voucher System
-
-- Giá trị: **200.000đ**
-- Thời hạn: **30 ngày**
-- Áp dụng: Đơn hàng đầu tiên
-- Mỗi khách hàng: 1 voucher duy nhất
-
-## 🔧 Development
-
-### Folder Structure
+## Folder Structure
 
 ```
 src/
 ├── components/
 │   ├── ui/              # shadcn/ui components
 │   ├── layout/          # Layout components
-│   └── features/        # Feature-specific components
+│   └── features/        # Feature components
 ├── pages/
 │   ├── landing/         # Landing pages
-│   ├── f0/             # F0 system pages
-│   └── admin/          # Admin system pages
-├── lib/
-│   ├── constants.ts    # App constants
-│   ├── utils.ts        # Utility functions
-│   └── mock/           # Mock data
-├── types/              # TypeScript types
-└── hooks/              # Custom React hooks
+│   ├── f0/              # F0 system pages
+│   │   └── auth/        # Auth pages
+│   └── admin/           # Admin pages
+├── services/            # API services
+├── lib/                 # Utils, constants
+├── types/               # TypeScript types
+└── hooks/               # Custom hooks
 ```
 
-### Commands
+## Routes
+
+### Landing
+| Route | Page |
+|-------|------|
+| `/` | Homepage |
+| `/affiliate-program` | Program info |
+| `/claim-voucher` | Claim voucher |
+
+### F0 Auth
+| Route | Page |
+|-------|------|
+| `/f0/auth/login` | Login |
+| `/f0/auth/signup` | Registration |
+| `/f0/auth/otp` | OTP verification |
+| `/f0/auth/forgot-password` | Forgot password |
+
+### F0 System
+| Route | Page |
+|-------|------|
+| `/f0/dashboard` | Dashboard |
+| `/f0/create-link` | Create referral link |
+| `/f0/refer-customer` | Refer customer |
+| `/f0/referral-history` | Referral history |
+| `/f0/withdrawal` | Withdrawal request |
+| `/f0/profile` | Profile |
+| `/f0/notifications` | Notifications |
+
+### Admin System
+| Route | Page |
+|-------|------|
+| `/admin/dashboard` | Dashboard |
+| `/admin/partners` | Partner management |
+| `/admin/customers` | Customer management |
+| `/admin/orders` | Orders |
+| `/admin/commissions` | Commissions |
+| `/admin/withdrawals` | Withdrawal processing |
+| `/admin/vouchers` | Vouchers |
+| `/admin/campaigns` | Campaigns |
+| `/admin/settings` | Settings |
+
+## Commission System
+
+| Tier | Customers/Quarter | First Order | Lifetime |
+|------|-------------------|-------------|----------|
+| Silver | 0-10 | 10% | 0% |
+| Gold | 11-30 | 10% | 5% |
+| Diamond | 31-50 | 10% | 8% |
+
+## Roadmap
+
+### Phase 1: Landing Pages ✅
+- [x] Homepage
+- [x] Affiliate Program page
+- [x] Voucher page
+
+### Phase 2: F0 System (In Progress)
+- [x] Auth UI pages (Login, Signup, OTP, Forgot Password)
+- [x] Dashboard UI
+- [x] Profile, Notifications UI
+- [ ] **Connect auth with Supabase**
+- [ ] **Integrate Vihat SMS OTP**
+- [ ] **Integrate Resend email**
+
+### Phase 3: Admin System
+- [x] Admin UI pages
+- [ ] Partner approval workflow
+- [ ] Commission management
+
+### Phase 4: Backend Integration
+- [x] Supabase project setup
+- [x] Database schema `affiliate`
+- [x] Table `f0_partners` with triggers
+- [ ] Row Level Security (RLS)
+- [ ] API integration
+
+### Phase 5: Deployment
+- [ ] Vercel deployment
+- [ ] Domain configuration
+
+## Commands
 
 ```bash
-npm run dev          # Start dev server
-npm run build        # Build for production
-npm run preview      # Preview production build
-npm run lint         # Run ESLint
+npm run dev          # Dev server
+npm run build        # Production build
+npm run preview      # Preview build
+npm run lint         # ESLint
 ```
 
-## 🌐 Environment Variables
-
-Tạo file `.env.local`:
-
-```env
-VITE_SUPABASE_URL=your_supabase_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-## 📝 Notes
-
-- Project sử dụng TypeScript strict mode
-- UI components từ shadcn/ui (customizable)
-- Color scheme: Green (#10B981)
-- Responsive design cho mobile/tablet/desktop
-- SEO-friendly với semantic HTML
-
-## 👥 Contributors
+## Contributors
 
 - Developer: AI-assisted development
 
-## 📄 License
+## License
 
-Private - Mắt Kính Tâm Đức
+Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 1 Complete ✅ | Next: F0 System Development
+**Status**: Phase 2 In Progress | Database Schema Created
