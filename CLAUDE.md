@@ -33,8 +33,10 @@ SUPABASE_URL                 # Auto-provided
 SUPABASE_ANON_KEY           # Auto-provided
 SUPABASE_SERVICE_ROLE_KEY   # Auto-provided
 RESEND_API_KEY              # Resend email service
-VIHAT_ENCRYPTION_KEY        # Vihat SMS decryption key
-KIOTVIET_ENCRYPTION_KEY     # KiotViet API decryption key
+VIHAT_API_KEY               # Vihat SMS API key (plaintext)
+VIHAT_SECRET_KEY            # Vihat SMS secret key (plaintext)
+VIHAT_ENCRYPTION_KEY        # Vihat SMS decryption key (for legacy encrypted credentials)
+KIOTVIET_ENCRYPTION_KEY     # KiotViet API decryption key (for legacy encrypted credentials)
 ```
 
 ## Database Schema
@@ -79,26 +81,98 @@ Stores OTP codes for phone verification.
 | created_at | TIMESTAMPTZ | Created date |
 | verified_at | TIMESTAMPTZ | Verification date |
 
-### Schema: `api`
+### Schema: `api` (IMPORTANT - Primary Access Layer)
 
-Views exposing `affiliate` tables for API access:
-- `api.f0_partners` → view of `affiliate.f0_partners`
-- `api.otp_verifications` → view of `affiliate.otp_verifications`
+**CRITICAL RULE:** All database access in Edge Functions MUST go through schema `api`, NOT directly to source schemas (`affiliate`, `supabaseapi`, `kiotviet`, `vouchers`, etc.).
 
-Both views have INSTEAD OF triggers for INSERT/UPDATE/DELETE operations.
+```javascript
+// ✅ CORRECT - Use schema 'api'
+const supabase = createClient(url, key, { db: { schema: 'api' } });
+await supabase.from('f0_partners').select('*');
 
-### Schema: `supabaseapi`
+// ❌ WRONG - Direct schema access will fail or return empty
+await supabase.schema('affiliate').from('f0_partners').select('*');
+await supabase.schema('supabaseapi').from('integration_credentials').select('*');
+```
+
+**Why?** Views in `api` schema have:
+- Proper RLS policies configured
+- INSTEAD OF triggers for INSERT/UPDATE/DELETE
+- Controlled column exposure (sensitive columns may be hidden)
+
+#### Available Views in `api` schema:
+
+| View | Source | Notes |
+|------|--------|-------|
+| `api.f0_partners` | `affiliate.f0_partners` | Full access |
+| `api.otp_verifications` | `affiliate.otp_verifications` | Full access |
+| `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
+| `api.vihat_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='vihat' |
+| `api.kiotviet_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='kiotviet' |
+| `api.oauth_clients` | `supabaseapi.oauth_clients` | OAuth clients |
+| `api.oauth_tokens` | `supabaseapi.oauth_tokens` | OAuth tokens |
+| `api.otp_login_vihat` | `supabaseapi.otp_login_vihat` | OTP login records |
+
+#### Handling Sensitive Credentials
+
+For sensitive data like `secret_key_encrypted`, use **RPC functions** to retrieve encrypted values, then decrypt using ENV keys:
+
+```javascript
+// ✅ CORRECT - Use RPC to get encrypted credentials, then decrypt with ENV key
+const { data: creds } = await supabase.rpc('get_vihat_credential');
+const encryptedSecret = creds.secret_key_encrypted;
+const decryptionKey = Deno.env.get('VIHAT_ENCRYPTION_KEY'); // Base64 encoded
+const secretKey = await decrypt(encryptedSecret, decryptionKey);
+
+// ❌ WRONG - Query will fail (column not exposed in view)
+const { data } = await supabase.from('integration_credentials')
+  .select('secret_key_encrypted')  // This column doesn't exist in api view!
+```
+
+#### RPC Functions for Credentials
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `api.get_vihat_credential()` | `{api_key, secret_key_encrypted}` | Get Vihat credentials including encrypted secret |
+| `api.get_kiotviet_credential()` | `{client_id, client_secret_encrypted}` | Get KiotViet credentials including encrypted secret |
+
+#### AES-256-GCM Decryption
+
+Credentials are encrypted with AES-256-GCM. Decrypt in Edge Functions:
+
+```javascript
+async function decrypt(encryptedBase64: string, keyBase64: string): Promise<string> {
+  const encryptedBytes = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+  const keyBytes = Uint8Array.from(atob(keyBase64), c => c.charCodeAt(0));
+
+  const iv = encryptedBytes.slice(0, 12);  // First 12 bytes = IV
+  const ciphertextWithTag = encryptedBytes.slice(12);  // Rest = ciphertext + auth tag
+
+  const cryptoKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, ciphertextWithTag);
+
+  return new TextDecoder().decode(decrypted);
+}
+```
+
+**Key Format:** Base64 encoded (44 characters) → decodes to 32 bytes for AES-256
+
+### Schema: `supabaseapi` (Internal Only)
+
+**DO NOT** query this schema directly from Edge Functions. Use `api` views instead.
 
 #### Table: `supabaseapi.integration_credentials`
 Stores encrypted API credentials for external services.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID | Primary key |
-| service_name | VARCHAR | Service identifier (e.g., 'vihat') |
-| api_key | VARCHAR | API key/ID |
-| secret_key_encrypted | TEXT | AES-256-GCM encrypted secret |
-| is_active | BOOLEAN | Whether credential is active |
+| Column | Type | Description | Exposed in API? |
+|--------|------|-------------|-----------------|
+| id | UUID | Primary key | Yes |
+| platform | VARCHAR | Service identifier (e.g., 'vihat', 'kiotviet') | Yes |
+| api_key | VARCHAR | API key/ID | Yes |
+| secret_key_encrypted | TEXT | AES-256-GCM encrypted secret | **NO** |
+| client_secret_encrypted | TEXT | AES-256-GCM encrypted client secret | **NO** |
+| is_active | BOOLEAN | Whether credential is active | Yes |
+| connection_status | VARCHAR | Connection status | Yes |
 
 ## Supabase Edge Functions
 
@@ -128,12 +202,20 @@ Sends OTP via Vihat SMS during registration.
 
 **Flow:**
 1. Validate input data
-2. Check for existing phone/email
-3. Get Vihat credentials from `supabaseapi.integration_credentials`
-4. Decrypt secret_key using AES-256-GCM
-5. Generate 6-digit OTP
-6. Save to `affiliate.otp_verifications` with registration_data
-7. Send SMS via Vihat API
+2. Check for existing phone/email (via `api.f0_partners`)
+3. Get Vihat credentials:
+   - `api_key` from RPC `get_vihat_credential()`
+   - `secret_key_encrypted` from RPC, decrypt using `VIHAT_ENCRYPTION_KEY` (Base64, AES-256-GCM)
+4. Generate 6-digit OTP
+5. Save to `api.otp_verifications` with registration_data
+6. Send SMS via Vihat MultiChannelMessage API (Zalo + SMS fallback)
+
+**Vihat API Configuration:**
+- Endpoint: `https://rest.esms.vn/MainService.svc/json/MultiChannelMessage/`
+- Channels: `["zalo", "sms"]`
+- Brandname: `MKTAMDUC`
+- TempID: `478665`
+- OAID: `939629380721919913`
 
 ### `verify-otp-affiliate`
 Verifies OTP and creates F0 partner account.
@@ -343,17 +425,21 @@ src/
 - [x] Table `affiliate.f0_partners` created with triggers
 - [x] Table `affiliate.otp_verifications` created
 - [x] Views in `api` schema for API access
-- [x] Edge Function `send-otp-affiliate` (Vihat SMS)
-- [x] Edge Function `verify-otp-affiliate` (+ Resend email)
-- [x] Edge Function `login-affiliate`
+- [x] RPC function `get_vihat_credential()` for encrypted credentials
+- [x] Edge Function `send-otp-affiliate` v12 (Vihat MultiChannelMessage API)
+- [x] Edge Function `verify-otp-affiliate` v7 (creates F0 partner account)
+- [x] Edge Function `login-affiliate` (SHA-256 password verification)
 - [x] SignupPage connected to send-otp-affiliate
 - [x] OTPPage connected to verify-otp-affiliate
 - [x] LoginPage connected to login-affiliate
+- [x] F0 Registration flow fully working (OTP via Zalo/SMS, account creation)
+- [x] Database permissions for `api` schema views (f0_partners, otp_verifications)
 
 ### In Progress
 - [ ] Forgot Password flow
 - [ ] Protected routes implementation
 - [ ] Admin approval workflow
+- [ ] Confirmation email via Resend (debugging)
 
 ### Pending
 - [ ] Row Level Security (RLS) policies
@@ -372,9 +458,44 @@ npm run lint     # Run ESLint
 ## Notes
 
 - Supabase project ID: `kcirpjxbjqagrqrjfldu`
-- Database uses schema `affiliate` (not `public`)
-- API access uses schema `api` (views to `affiliate` tables)
+- **Database access MUST use schema `api`** (views with proper RLS & triggers)
+- DO NOT query source schemas directly (`affiliate`, `supabaseapi`, `kiotviet`, `vouchers`)
 - F0 code format: `F0-XXXX` (auto-generated)
 - Phone number format: Vietnamese (10 digits, starts with 0)
 - Password hashing: SHA-256 (in Edge Functions)
-- Vihat credentials: Encrypted with AES-256-GCM, stored in `supabaseapi.integration_credentials`
+- **Sensitive credentials (API keys, secrets) MUST use ENV variables**, not database queries
+
+## Database Schema Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Schema: api                              │
+│  (Views - Primary Access Layer for Edge Functions)          │
+│                                                              │
+│  ┌──────────────────┐  ┌──────────────────┐                │
+│  │ api.f0_partners  │  │ api.otp_verifi.. │                │
+│  └────────┬─────────┘  └────────┬─────────┘                │
+│           │                     │                           │
+├───────────┼─────────────────────┼───────────────────────────┤
+│           ▼                     ▼                           │
+│  ┌──────────────────────────────────────────┐              │
+│  │           Schema: affiliate               │              │
+│  │  (Source tables - DO NOT query directly)  │              │
+│  │  • f0_partners                            │              │
+│  │  • otp_verifications                      │              │
+│  └──────────────────────────────────────────┘              │
+│                                                              │
+│  ┌──────────────────────────────────────────┐              │
+│  │           Schema: supabaseapi             │              │
+│  │  (Source tables - DO NOT query directly)  │              │
+│  │  • integration_credentials                │              │
+│  │  • oauth_clients, oauth_tokens            │              │
+│  │  • otp_login_vihat                        │              │
+│  └──────────────────────────────────────────┘              │
+│                                                              │
+│  ┌──────────────────────────────────────────┐              │
+│  │    Other schemas: kiotviet, vouchers      │              │
+│  │  (Source tables - DO NOT query directly)  │              │
+│  └──────────────────────────────────────────┘              │
+└─────────────────────────────────────────────────────────────┘
+```

@@ -87,11 +87,19 @@ Views exposing `affiliate` tables for API access:
 
 ## Supabase Edge Functions
 
-| Function | Description |
-|----------|-------------|
-| `send-otp-affiliate` | Send OTP via Vihat SMS during registration |
-| `verify-otp-affiliate` | Verify OTP, create account, send confirmation email |
-| `login-affiliate` | Authenticate F0 partner |
+| Function | Version | Description |
+|----------|---------|-------------|
+| `send-otp-affiliate` | v12 | Send OTP via Vihat MultiChannelMessage API (Zalo + SMS fallback) |
+| `verify-otp-affiliate` | v7 | Verify OTP, create F0 partner account (uses schema `api`) |
+| `login-affiliate` | - | Authenticate F0 partner (SHA-256 password verification) |
+
+### Vihat API Configuration
+
+- **Endpoint:** `https://rest.esms.vn/MainService.svc/json/MultiChannelMessage/`
+- **Channels:** `["zalo", "sms"]` (Zalo first, SMS fallback)
+- **Brandname:** `MKTAMDUC`
+- **TempID:** `478665`
+- **OAID:** `939629380721919913`
 
 ## Authentication Flow
 
@@ -192,8 +200,9 @@ src/
 - [x] Dashboard UI
 - [x] Profile, Notifications UI
 - [x] Connect auth with Supabase Edge Functions
-- [x] Integrate Vihat SMS OTP
-- [x] Integrate Resend email
+- [x] Integrate Vihat SMS OTP (MultiChannelMessage API with Zalo + SMS)
+- [x] F0 Registration flow fully working (OTP sent, verified, account created)
+- [ ] Integrate Resend email (in progress)
 
 ### Phase 3: Admin System (In Progress)
 - [x] Admin UI pages
@@ -205,10 +214,12 @@ src/
 - [x] Database schema `affiliate`
 - [x] Table `f0_partners` with triggers
 - [x] Table `otp_verifications`
-- [x] Views in `api` schema
-- [x] Edge Function `send-otp-affiliate`
-- [x] Edge Function `verify-otp-affiliate`
+- [x] Views in `api` schema (with INSTEAD OF triggers)
+- [x] RPC function `get_vihat_credential()` for encrypted credentials
+- [x] Edge Function `send-otp-affiliate` v12 (Vihat MultiChannelMessage)
+- [x] Edge Function `verify-otp-affiliate` v7 (uses schema `api`)
 - [x] Edge Function `login-affiliate`
+- [x] Database permissions for service_role on `api` schema views
 - [ ] Row Level Security (RLS)
 
 ### Phase 5: Deployment
@@ -234,4 +245,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 2 Complete | Phase 3 In Progress
+**Status**: Phase 2 Complete (F0 Registration Working) | Phase 3 In Progress
