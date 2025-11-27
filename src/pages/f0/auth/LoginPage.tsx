@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Eye, EyeOff } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
+  const [pendingApproval, setPendingApproval] = useState(false);
   const [formData, setFormData] = useState({
     emailOrPhone: '',
     password: '',
@@ -17,18 +23,67 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setApiError('');
+    setPendingApproval(false);
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Call Edge Function to login
+      const { data, error } = await supabase.functions.invoke('login-affiliate', {
+        body: {
+          email_or_phone: formData.emailOrPhone,
+          password: formData.password
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Có lỗi xảy ra');
+      }
+
+      if (!data?.success) {
+        // Check for locked account
+        if (data?.status === 'locked') {
+          throw new Error(data.error);
+        }
+        throw new Error(data?.error || 'Đăng nhập thất bại');
+      }
+
+      // Check approval status
+      if (data.approval_status === 'pending') {
+        setPendingApproval(true);
+        // Store user data temporarily for display
+        localStorage.setItem('f0_pending_user', JSON.stringify(data.user));
+        return;
+      }
+
+      // Login successful - store user data and navigate to dashboard
+      if (rememberMe) {
+        localStorage.setItem('f0_user', JSON.stringify(data.user));
+      } else {
+        sessionStorage.setItem('f0_user', JSON.stringify(data.user));
+      }
+
+      // Navigate to dashboard
+      navigate('/f0/dashboard');
+
+    } catch (err: any) {
+      console.error('Login error:', err);
+      setApiError(err.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
       setIsLoading(false);
-      console.log('Login submitted:', formData, 'Remember me:', rememberMe);
-    }, 1500);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    // Clear errors when user types
+    if (apiError) {
+      setApiError('');
+    }
+    if (pendingApproval) {
+      setPendingApproval(false);
+    }
   };
 
   return (
@@ -50,6 +105,28 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
+              {/* API Error Alert */}
+              {apiError && (
+                <Alert variant="error">
+                  <AlertDescription>{apiError}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Pending Approval Message */}
+              {pendingApproval && (
+                <Alert variant="warning">
+                  <AlertDescription>
+                    <div className="space-y-2">
+                      <p className="font-medium">Tài khoản đang chờ phê duyệt</p>
+                      <p className="text-sm">
+                        Tài khoản của bạn đã được tạo thành công nhưng đang chờ phê duyệt từ quản trị viên.
+                        Bạn sẽ nhận được email thông báo khi tài khoản được phê duyệt.
+                      </p>
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {/* Email/Phone Input */}
               <div className="space-y-2">
                 <Label htmlFor="emailOrPhone">Email hoặc Số điện thoại</Label>
@@ -61,6 +138,7 @@ export default function LoginPage() {
                   value={formData.emailOrPhone}
                   onChange={handleInputChange}
                   required
+                  disabled={isLoading}
                 />
               </div>
 
@@ -76,6 +154,7 @@ export default function LoginPage() {
                     value={formData.password}
                     onChange={handleInputChange}
                     required
+                    disabled={isLoading}
                     className="pr-10"
                   />
                   <button

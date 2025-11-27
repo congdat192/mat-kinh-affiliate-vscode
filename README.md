@@ -17,7 +17,7 @@ The system consists of 3 main modules:
 | Styling | Tailwind CSS + shadcn/ui |
 | Routing | React Router v7 |
 | Database | Supabase (PostgreSQL) |
-| SMS OTP | Vihat |
+| SMS OTP | Vihat (eSMS.vn) |
 | Email | Resend |
 | Deployment | Vercel (planned) |
 
@@ -49,10 +49,6 @@ Create `.env` file:
 VITE_SUPABASE_PROJECT_ID=your_project_id
 VITE_SUPABASE_PUBLISHABLE_KEY=your_anon_key
 VITE_SUPABASE_URL=your_supabase_url
-
-RESEND_API_KEY=your_resend_api_key
-VIHAT_ENCRYPTION_KEY=your_vihat_key
-KIOTVIET_ENCRYPTION_KEY=your_kiotviet_key
 ```
 
 ## Database Schema
@@ -66,13 +62,36 @@ KIOTVIET_ENCRYPTION_KEY=your_kiotviet_key
 | phone | VARCHAR(15) | Phone (unique) |
 | email | VARCHAR(255) | Email (unique) |
 | full_name | VARCHAR(255) | Full name |
-| password_hash | VARCHAR(255) | Hashed password |
+| password_hash | VARCHAR(255) | SHA-256 hashed password |
 | f0_code | VARCHAR(20) | Auto F0 code (F0-XXXX) |
 | is_active | BOOLEAN | Account active status |
 | is_approved | BOOLEAN | Approval status |
 | created_at | TIMESTAMPTZ | Created date |
 | approved_at | TIMESTAMPTZ | Approved date |
 | approved_by | UUID | Approving admin |
+
+#### Table: `otp_verifications`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| phone | VARCHAR(15) | Phone number |
+| otp_code | VARCHAR(6) | 6-digit OTP |
+| registration_data | JSONB | Temp registration data |
+| expires_at | TIMESTAMPTZ | Expiration time |
+| is_used | BOOLEAN | Used status |
+
+### Schema: `api`
+Views exposing `affiliate` tables for API access:
+- `api.f0_partners` → view of `affiliate.f0_partners`
+- `api.otp_verifications` → view of `affiliate.otp_verifications`
+
+## Supabase Edge Functions
+
+| Function | Description |
+|----------|-------------|
+| `send-otp-affiliate` | Send OTP via Vihat SMS during registration |
+| `verify-otp-affiliate` | Verify OTP, create account, send confirmation email |
+| `login-affiliate` | Authenticate F0 partner |
 
 ## Authentication Flow
 
@@ -104,7 +123,10 @@ src/
 │   │   └── auth/        # Auth pages
 │   └── admin/           # Admin pages
 ├── services/            # API services
-├── lib/                 # Utils, constants
+├── lib/
+│   ├── supabase.ts      # Supabase client (uses 'api' schema)
+│   ├── constants.ts     # App constants
+│   └── utils.ts         # Utility functions
 ├── types/               # TypeScript types
 └── hooks/               # Custom hooks
 ```
@@ -165,25 +187,29 @@ src/
 - [x] Affiliate Program page
 - [x] Voucher page
 
-### Phase 2: F0 System (In Progress)
+### Phase 2: F0 System ✅
 - [x] Auth UI pages (Login, Signup, OTP, Forgot Password)
 - [x] Dashboard UI
 - [x] Profile, Notifications UI
-- [ ] **Connect auth with Supabase**
-- [ ] **Integrate Vihat SMS OTP**
-- [ ] **Integrate Resend email**
+- [x] Connect auth with Supabase Edge Functions
+- [x] Integrate Vihat SMS OTP
+- [x] Integrate Resend email
 
-### Phase 3: Admin System
+### Phase 3: Admin System (In Progress)
 - [x] Admin UI pages
 - [ ] Partner approval workflow
 - [ ] Commission management
 
-### Phase 4: Backend Integration
+### Phase 4: Backend Integration ✅
 - [x] Supabase project setup
 - [x] Database schema `affiliate`
 - [x] Table `f0_partners` with triggers
+- [x] Table `otp_verifications`
+- [x] Views in `api` schema
+- [x] Edge Function `send-otp-affiliate`
+- [x] Edge Function `verify-otp-affiliate`
+- [x] Edge Function `login-affiliate`
 - [ ] Row Level Security (RLS)
-- [ ] API integration
 
 ### Phase 5: Deployment
 - [ ] Vercel deployment
@@ -208,4 +234,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 2 In Progress | Database Schema Created
+**Status**: Phase 2 Complete | Phase 3 In Progress

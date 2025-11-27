@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Eye, EyeOff } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function SignupPage() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     fullName: '',
@@ -65,6 +70,7 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setApiError('');
 
     if (!validateForm()) {
       return;
@@ -72,12 +78,42 @@ export default function SignupPage() {
 
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Call Edge Function to send OTP
+      const { data, error } = await supabase.functions.invoke('send-otp-affiliate', {
+        body: {
+          phone: formData.phone,
+          email: formData.email,
+          full_name: formData.fullName,
+          password: formData.password,
+          referral_code: formData.referralCode || null
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Có lỗi xảy ra');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Không thể gửi OTP');
+      }
+
+      // Navigate to OTP page with record_id and phone
+      navigate('/f0/auth/otp', {
+        state: {
+          record_id: data.record_id,
+          phone: formData.phone,
+          phone_masked: data.phone_masked,
+          expires_in: data.expires_in
+        }
+      });
+
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      setApiError(err.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
       setIsLoading(false);
-      console.log('Signup submitted:', formData);
-      // Redirect to OTP page or login
-    }, 1500);
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,6 +122,10 @@ export default function SignupPage() {
     // Clear error for this field when user starts typing
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+    // Clear API error when user makes changes
+    if (apiError) {
+      setApiError('');
     }
   };
 
@@ -108,6 +148,13 @@ export default function SignupPage() {
 
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
+              {/* API Error Alert */}
+              {apiError && (
+                <Alert variant="error">
+                  <AlertDescription>{apiError}</AlertDescription>
+                </Alert>
+              )}
+
               {/* Full Name Input */}
               <div className="space-y-2">
                 <Label htmlFor="fullName">Họ và tên</Label>
@@ -119,6 +166,7 @@ export default function SignupPage() {
                   value={formData.fullName}
                   onChange={handleInputChange}
                   required
+                  disabled={isLoading}
                   className={errors.fullName ? 'border-red-500' : ''}
                 />
                 {errors.fullName && (
@@ -137,6 +185,7 @@ export default function SignupPage() {
                   value={formData.phone}
                   onChange={handleInputChange}
                   required
+                  disabled={isLoading}
                   className={errors.phone ? 'border-red-500' : ''}
                 />
                 {errors.phone && (
@@ -155,6 +204,7 @@ export default function SignupPage() {
                   value={formData.email}
                   onChange={handleInputChange}
                   required
+                  disabled={isLoading}
                   className={errors.email ? 'border-red-500' : ''}
                 />
                 {errors.email && (
@@ -174,12 +224,14 @@ export default function SignupPage() {
                     value={formData.password}
                     onChange={handleInputChange}
                     required
+                    disabled={isLoading}
                     className={`pr-10 ${errors.password ? 'border-red-500' : ''}`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    disabled={isLoading}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -205,12 +257,14 @@ export default function SignupPage() {
                     value={formData.confirmPassword}
                     onChange={handleInputChange}
                     required
+                    disabled={isLoading}
                     className={`pr-10 ${errors.confirmPassword ? 'border-red-500' : ''}`}
                   />
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    disabled={isLoading}
                   >
                     {showConfirmPassword ? (
                       <EyeOff className="h-4 w-4" />
@@ -234,6 +288,7 @@ export default function SignupPage() {
                   placeholder="Nhập mã giới thiệu"
                   value={formData.referralCode}
                   onChange={handleInputChange}
+                  disabled={isLoading}
                 />
               </div>
 
@@ -250,6 +305,7 @@ export default function SignupPage() {
                       }
                     }}
                     className="mt-1"
+                    disabled={isLoading}
                   />
                   <Label
                     htmlFor="agreeToTerms"
@@ -276,7 +332,7 @@ export default function SignupPage() {
                 className="w-full"
                 disabled={isLoading}
               >
-                {isLoading ? 'Đang đăng ký...' : 'Đăng ký'}
+                {isLoading ? 'Đang gửi OTP...' : 'Đăng ký'}
               </Button>
             </CardContent>
 
