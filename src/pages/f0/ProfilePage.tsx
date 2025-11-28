@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   User,
   Lock,
@@ -21,22 +22,35 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-// Mock user data
-const mockUserData = {
+// Type for F0 user from storage
+interface F0User {
+  id: string;
+  f0_code: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  is_active: boolean;
+  is_approved: boolean;
+  created_at: string;
+}
+
+// Default empty user data structure
+const getDefaultUserData = (f0User: F0User | null) => ({
   avatar: '',
-  fullName: 'Nguyễn Văn A',
-  email: 'nguyenvana@example.com',
-  phone: '0912345678',
-  dateOfBirth: '1990-01-15',
-  gender: 'male',
-  address: '123 Đường ABC, Phường XYZ, Quận 1, TP.HCM',
-  bankName: 'Vietcombank',
-  accountNumber: '1234567890',
-  accountHolder: 'NGUYEN VAN A',
-  branch: 'Chi nhánh Sài Gòn',
-  currentTier: 'gold',
+  fullName: f0User?.full_name || '',
+  email: f0User?.email || '',
+  phone: f0User?.phone || '',
+  f0Code: f0User?.f0_code || '',
+  dateOfBirth: '',
+  gender: '',
+  address: '',
+  bankName: '',
+  accountNumber: '',
+  accountHolder: '',
+  branch: '',
+  currentTier: 'silver', // Default tier
   twoFactorEnabled: false,
-};
+});
 
 // Vietnam banks list
 const vietnamBanks = [
@@ -52,26 +66,29 @@ const vietnamBanks = [
   { value: 'tpbank', label: 'TPBank - Ngân hàng TMCP Tiên Phong' },
 ];
 
-// Mock active sessions
-const mockSessions = [
-  {
-    id: 1,
-    device: 'Chrome on Windows',
-    location: 'TP.HCM, Việt Nam',
-    lastActive: '2 phút trước',
-    current: true,
-  },
-  {
-    id: 2,
-    device: 'Safari on iPhone',
-    location: 'Hà Nội, Việt Nam',
-    lastActive: '1 ngày trước',
-    current: false,
-  },
-];
-
 const ProfilePage = () => {
-  const [userData, setUserData] = useState(mockUserData);
+  const navigate = useNavigate();
+  const [f0User, setF0User] = useState<F0User | null>(null);
+  const [userData, setUserData] = useState(getDefaultUserData(null));
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load user data from storage on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser) as F0User;
+        setF0User(parsedUser);
+        setUserData(getDefaultUserData(parsedUser));
+      } catch (e) {
+        console.error('Error parsing user data:', e);
+        navigate('/f0/auth/login');
+      }
+    } else {
+      navigate('/f0/auth/login');
+    }
+    setIsLoading(false);
+  }, [navigate]);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -223,13 +240,27 @@ const ProfilePage = () => {
     }
   };
 
+  // Show loading while fetching user data
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Đang tải...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 lg:p-8">
       <div className="max-w-4xl mx-auto space-y-6">
         {/* Page Title */}
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Hồ Sơ Của Tôi</h1>
-          <p className="text-gray-500 mt-1">Quản lý thông tin cá nhân và cài đặt bảo mật</p>
+          <p className="text-gray-500 mt-1">
+            Mã F0: <span className="font-semibold text-primary-600">{f0User?.f0_code}</span> • Quản lý thông tin cá nhân và cài đặt bảo mật
+          </p>
         </div>
 
         {/* Success/Error Messages */}
@@ -692,25 +723,20 @@ const ProfilePage = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {mockSessions.map((session) => (
-                    <div
-                      key={session.id}
-                      className="flex items-start justify-between p-4 border rounded-lg"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{session.device}</p>
-                          {session.current && (
-                            <Badge variant="success">Phiên hiện tại</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-600 mt-1">{session.location}</p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Hoạt động lần cuối: {session.lastActive}
-                        </p>
+                  <div className="flex items-start justify-between p-4 border rounded-lg">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">Phiên đăng nhập hiện tại</p>
+                        <Badge variant="success">Đang hoạt động</Badge>
                       </div>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Mã F0: {f0User?.f0_code || 'N/A'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Đăng nhập từ: {new Date().toLocaleDateString('vi-VN')}
+                      </p>
                     </div>
-                  ))}
+                  </div>
 
                   <Button
                     variant="outline"

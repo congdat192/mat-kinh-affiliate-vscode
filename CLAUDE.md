@@ -32,12 +32,18 @@ VITE_SUPABASE_URL            # Supabase API URL
 SUPABASE_URL                 # Auto-provided
 SUPABASE_ANON_KEY           # Auto-provided
 SUPABASE_SERVICE_ROLE_KEY   # Auto-provided
-RESEND_API_KEY              # Resend email service
+RESEND_API_KEY              # Encryption key for Resend API (Base64, AES-256-GCM) - NOT the actual API key
 VIHAT_API_KEY               # Vihat SMS API key (plaintext)
 VIHAT_SECRET_KEY            # Vihat SMS secret key (plaintext)
 VIHAT_ENCRYPTION_KEY        # Vihat SMS decryption key (for legacy encrypted credentials)
 KIOTVIET_ENCRYPTION_KEY     # KiotViet API decryption key (for legacy encrypted credentials)
 ```
+
+**Note on RESEND_API_KEY:**
+- This is NOT the actual Resend API key
+- It's an AES-256-GCM encryption key used to decrypt the real API key stored in database
+- The actual Resend API key is stored encrypted in `supabaseapi.integration_credentials` table
+- Flow: `get_resend_credential()` → decrypt with `RESEND_API_KEY` → use real API key
 
 ## Database Schema
 
@@ -135,6 +141,7 @@ const { data } = await supabase.from('integration_credentials')
 |----------|---------|-------------|
 | `api.get_vihat_credential()` | `{api_key, secret_key_encrypted}` | Get Vihat credentials including encrypted secret |
 | `api.get_kiotviet_credential()` | `{client_id, client_secret_encrypted}` | Get KiotViet credentials including encrypted secret |
+| `api.get_resend_credential()` | `{api_key, client_secret_encrypted}` | Get Resend credentials including encrypted API key |
 
 #### AES-256-GCM Decryption
 
@@ -250,10 +257,66 @@ Verifies OTP and creates F0 partner account.
 2. Validate OTP (not used, not expired, max 5 attempts)
 3. Create F0 partner in `affiliate.f0_partners`
 4. Mark OTP as used
-5. Send confirmation email via Resend
+5. Call `send-affiliate-registration-email` Edge Function (non-blocking)
 
-### `login-affiliate`
-Authenticates F0 partner.
+### `send-affiliate-registration-email`
+Sends registration confirmation email to new F0 partner (pending approval).
+
+**Request:**
+```json
+{
+  "email": "user@email.com",
+  "fullName": "Nguyen Van A",
+  "f0Code": "F0-1234",
+  "phone": "0912345678"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Email sent successfully",
+  "emailId": "resend-email-id"
+}
+```
+
+**Flow:**
+1. Get Resend credentials via `get_resend_credential()` RPC
+2. Decrypt API key using `RESEND_API_KEY` (encryption key from ENV)
+3. Send email via Resend API
+4. Sender: `Mắt Kính Tâm Đức <affiliate@matkinhtamduc.com>`
+
+### `send-affiliate-approval-email`
+Sends account activation email when admin approves F0 partner.
+
+**Request:**
+```json
+{
+  "email": "user@email.com",
+  "fullName": "Nguyen Van A",
+  "f0Code": "F0-1234",
+  "loginUrl": "https://matkinhtamduc.com/f0/auth/login"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Email sent successfully",
+  "emailId": "resend-email-id"
+}
+```
+
+**Flow:**
+1. Get Resend credentials via `get_resend_credential()` RPC
+2. Decrypt API key using `RESEND_API_KEY` (encryption key from ENV)
+3. Send email via Resend API
+4. Sender: `Mắt Kính Tâm Đức <affiliate@matkinhtamduc.com>`
+
+### `login-affiliate` (v13)
+Authenticates F0 partner with specific error codes.
 
 **Request:**
 ```json
@@ -263,7 +326,7 @@ Authenticates F0 partner.
 }
 ```
 
-**Response:**
+**Success Response:**
 ```json
 {
   "success": true,
@@ -281,9 +344,30 @@ Authenticates F0 partner.
 }
 ```
 
+**Error Response (always HTTP 200 for FE parsing):**
+```json
+{
+  "success": false,
+  "error": "Mật khẩu không chính xác. Vui lòng thử lại.",
+  "error_code": "WRONG_PASSWORD"
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `MISSING_FIELDS` | Email/phone or password empty | Vui lòng nhập email/số điện thoại và mật khẩu |
+| `INVALID_FORMAT` | Invalid email/phone format | Email hoặc số điện thoại không hợp lệ |
+| `USER_NOT_FOUND` | Account doesn't exist | Tài khoản không tồn tại. Vui lòng kiểm tra lại email/số điện thoại. |
+| `WRONG_PASSWORD` | Incorrect password | Mật khẩu không chính xác. Vui lòng thử lại. |
+| `ACCOUNT_LOCKED` | Account is_active = false | Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên. |
+| `SYSTEM_ERROR` | Unexpected server error | Lỗi hệ thống. Vui lòng thử lại sau. |
+
+**Important:** All responses return HTTP 200 status to ensure the Supabase client puts response in `data` (not `error`), allowing frontend to parse `error_code` correctly.
+
 **Flow:**
 1. Determine if input is email or phone
-2. Find user in `affiliate.f0_partners`
+2. Find user in `api.f0_partners`
 3. Verify password (SHA-256 hash)
 4. Check account status (is_active)
 5. Return user data with approval_status
@@ -305,13 +389,13 @@ Authenticates F0 partner.
    |
 6. Create F0 partner (is_approved = false)
    |
-7. Send confirmation email via Resend
+7. Call send-affiliate-registration-email (pending approval notification)
    |
 8. Show success screen with F0 code
    |
 9. Wait for Admin approval
    |
-10. Admin approves -> Send notification email
+10. Admin approves -> Call send-affiliate-approval-email
    |
 11. User can login & use system normally
 ```
@@ -426,9 +510,12 @@ src/
 - [x] Table `affiliate.otp_verifications` created
 - [x] Views in `api` schema for API access
 - [x] RPC function `get_vihat_credential()` for encrypted credentials
+- [x] RPC function `get_resend_credential()` for encrypted Resend API key
 - [x] Edge Function `send-otp-affiliate` v12 (Vihat MultiChannelMessage API)
-- [x] Edge Function `verify-otp-affiliate` v7 (creates F0 partner account)
-- [x] Edge Function `login-affiliate` (SHA-256 password verification)
+- [x] Edge Function `verify-otp-affiliate` v18 (creates F0 partner, calls registration email)
+- [x] Edge Function `login-affiliate` v13 (SHA-256 password verification, specific error codes)
+- [x] Edge Function `send-affiliate-registration-email` v1 (pending approval email)
+- [x] Edge Function `send-affiliate-approval-email` v1 (account activated email)
 - [x] SignupPage connected to send-otp-affiliate
 - [x] OTPPage connected to verify-otp-affiliate
 - [x] LoginPage connected to login-affiliate
@@ -438,13 +525,12 @@ src/
 ### In Progress
 - [ ] Forgot Password flow
 - [ ] Protected routes implementation
-- [ ] Admin approval workflow
-- [ ] Confirmation email via Resend (debugging)
+- [ ] Admin approval workflow (call send-affiliate-approval-email when approving)
 
 ### Pending
 - [ ] Row Level Security (RLS) policies
 - [ ] Real-time notifications
-- [ ] Admin approval email notification
+- [ ] Test email flow end-to-end
 
 ## Commands
 

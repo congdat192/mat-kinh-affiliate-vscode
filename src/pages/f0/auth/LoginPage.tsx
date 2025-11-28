@@ -36,16 +36,18 @@ export default function LoginPage() {
         }
       });
 
+      // Network or connection error
       if (error) {
-        throw new Error(error.message || 'Có lỗi xảy ra');
+        console.error('Supabase invoke error:', error);
+        throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
       }
 
+      // Edge Function returned error (success: false)
       if (!data?.success) {
-        // Check for locked account
-        if (data?.status === 'locked') {
-          throw new Error(data.error);
-        }
-        throw new Error(data?.error || 'Đăng nhập thất bại');
+        // Use error message directly from Edge Function (already in Vietnamese)
+        const errorMessage = data?.error || 'Đăng nhập thất bại';
+        console.log('Login failed:', data?.error_code, errorMessage);
+        throw new Error(errorMessage);
       }
 
       // Check approval status

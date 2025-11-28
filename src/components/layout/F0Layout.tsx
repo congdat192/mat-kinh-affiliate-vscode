@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useLocation, Outlet } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Link as LinkIcon,
@@ -26,18 +26,64 @@ const navigation = [
   { name: 'Hồ Sơ', href: '/f0/profile', icon: User },
 ];
 
+// Type for F0 user data
+interface F0User {
+  id: string;
+  f0_code: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  is_active: boolean;
+  is_approved: boolean;
+  created_at: string;
+}
+
 export default function F0Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [user, setUser] = useState<F0User | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
 
-  // Mock user data - sẽ thay thế bằng real data từ auth context
-  const user = {
-    name: 'Nguyễn Văn A',
-    email: 'nguyenvana@gmail.com',
-    tier: 'Gold',
-    avatar: null
+  // Load user data from storage
+  useEffect(() => {
+    const storedUser = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
+    if (storedUser) {
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.error('Error parsing user data:', e);
+        // Invalid data, redirect to login
+        navigate('/f0/auth/login');
+      }
+    } else {
+      // No user data, redirect to login
+      navigate('/f0/auth/login');
+    }
+  }, [navigate]);
+
+  // Handle logout
+  const handleLogout = () => {
+    // Clear all user data from storage
+    localStorage.removeItem('f0_user');
+    localStorage.removeItem('f0_pending_user');
+    sessionStorage.removeItem('f0_user');
+
+    // Redirect to login
+    navigate('/f0/auth/login');
   };
+
+  // Show loading if user not loaded yet
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Đang tải...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -98,11 +144,11 @@ export default function F0Layout() {
               className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors"
             >
               <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary-500 flex items-center justify-center text-white font-semibold">
-                {user.name.charAt(0)}
+                {user.full_name.charAt(0)}
               </div>
               <div className="flex-1 text-left">
-                <p className="text-sm font-medium text-gray-900">{user.name}</p>
-                <p className="text-xs text-gray-500">Hạng {user.tier}</p>
+                <p className="text-sm font-medium text-gray-900">{user.full_name}</p>
+                <p className="text-xs text-gray-500">{user.f0_code}</p>
               </div>
               <ChevronDown className={`h-4 w-4 text-gray-500 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -118,10 +164,7 @@ export default function F0Layout() {
                   Hồ sơ
                 </Link>
                 <button
-                  onClick={() => {
-                    // Handle logout
-                    console.log('Logout');
-                  }}
+                  onClick={handleLogout}
                   className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg"
                 >
                   <LogOut className="h-4 w-4" />

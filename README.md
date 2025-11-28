@@ -90,8 +90,10 @@ Views exposing `affiliate` tables for API access:
 | Function | Version | Description |
 |----------|---------|-------------|
 | `send-otp-affiliate` | v12 | Send OTP via Vihat MultiChannelMessage API (Zalo + SMS fallback) |
-| `verify-otp-affiliate` | v7 | Verify OTP, create F0 partner account (uses schema `api`) |
-| `login-affiliate` | - | Authenticate F0 partner (SHA-256 password verification) |
+| `verify-otp-affiliate` | v18 | Verify OTP, create F0 partner account, call registration email |
+| `login-affiliate` | v13 | Authenticate F0 partner (SHA-256 password, specific error codes) |
+| `send-affiliate-registration-email` | v1 | Send registration confirmation email (pending approval) |
+| `send-affiliate-approval-email` | v1 | Send account activation email (after admin approval) |
 
 ### Vihat API Configuration
 
@@ -104,9 +106,9 @@ Views exposing `affiliate` tables for API access:
 ## Authentication Flow
 
 ```
-Register -> Send OTP (SMS) -> Verify OTP -> Save to DB -> Confirmation email
+Register -> Send OTP (SMS) -> Verify OTP -> Save to DB -> Registration email (pending)
                                                               |
-                                Login <- Notification email <- Admin approval
+                                Login <- Approval email <- Admin approval
 ```
 
 ### Account Status
@@ -202,7 +204,7 @@ src/
 - [x] Connect auth with Supabase Edge Functions
 - [x] Integrate Vihat SMS OTP (MultiChannelMessage API with Zalo + SMS)
 - [x] F0 Registration flow fully working (OTP sent, verified, account created)
-- [ ] Integrate Resend email (in progress)
+- [x] Integrate Resend email (registration + approval emails)
 
 ### Phase 3: Admin System (In Progress)
 - [x] Admin UI pages
@@ -216,9 +218,12 @@ src/
 - [x] Table `otp_verifications`
 - [x] Views in `api` schema (with INSTEAD OF triggers)
 - [x] RPC function `get_vihat_credential()` for encrypted credentials
+- [x] RPC function `get_resend_credential()` for encrypted Resend API key
 - [x] Edge Function `send-otp-affiliate` v12 (Vihat MultiChannelMessage)
-- [x] Edge Function `verify-otp-affiliate` v7 (uses schema `api`)
-- [x] Edge Function `login-affiliate`
+- [x] Edge Function `verify-otp-affiliate` v18 (calls registration email)
+- [x] Edge Function `login-affiliate` v13 (specific error codes)
+- [x] Edge Function `send-affiliate-registration-email` v1
+- [x] Edge Function `send-affiliate-approval-email` v1
 - [x] Database permissions for service_role on `api` schema views
 - [ ] Row Level Security (RLS)
 
