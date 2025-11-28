@@ -87,6 +87,28 @@ Stores OTP codes for phone verification.
 | created_at | TIMESTAMPTZ | Created date |
 | verified_at | TIMESTAMPTZ | Verification date |
 
+#### Table: `affiliate.campaign_settings`
+Stores campaign settings for F0 referral links (managed by Admin ERP).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| campaign_id | VARCHAR(50) | ID từ KiotViet |
+| campaign_code | VARCHAR(100) | Mã campaign từ KiotViet |
+| name | VARCHAR(255) | Tên chiến dịch |
+| description | TEXT | Mô tả |
+| is_active | BOOLEAN | TRUE = hiển thị cho F0 |
+| is_default | BOOLEAN | TRUE = auto-select trong dropdown |
+| voucher_image_url | TEXT | URL ảnh voucher |
+| created_at | TIMESTAMPTZ | Created date |
+| updated_at | TIMESTAMPTZ | Updated date |
+| created_by | UUID | Admin who created |
+
+**Usage in F0 Portal:**
+- F0 chọn chiến dịch từ dropdown khi tạo link giới thiệu
+- Chỉ hiển thị campaigns có `is_active = true`
+- Campaign có `is_default = true` sẽ được auto-select
+
 ### Schema: `api` (IMPORTANT - Primary Access Layer)
 
 **CRITICAL RULE:** All database access in Edge Functions MUST go through schema `api`, NOT directly to source schemas (`affiliate`, `supabaseapi`, `kiotviet`, `vouchers`, etc.).
@@ -112,6 +134,7 @@ await supabase.schema('supabaseapi').from('integration_credentials').select('*')
 |------|--------|-------|
 | `api.f0_partners` | `affiliate.f0_partners` | Full access |
 | `api.otp_verifications` | `affiliate.otp_verifications` | Full access |
+| `api.affiliate_campaign_settings` | `affiliate.campaign_settings` | Campaign settings for F0 referral links |
 | `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
 | `api.vihat_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='vihat' |
 | `api.kiotviet_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='kiotviet' |

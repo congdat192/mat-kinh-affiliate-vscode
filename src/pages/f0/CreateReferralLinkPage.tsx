@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Loader2,
   Gift,
+  AlertCircle,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,8 +31,7 @@ import {
 } from '@/components/ui/table';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { authService } from '@/services/authService';
-import { campaignService } from '@/services/campaignService';
-import type { Campaign } from '@/types/campaign';
+import { affiliateCampaignService, type AffiliateCampaign } from '@/services/affiliateCampaignService';
 
 // Mock data for recently created links
 const mockRecentLinks = [
@@ -88,9 +88,11 @@ const mockRecentLinks = [
 ];
 
 const CreateReferralLinkPage = () => {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns, setCampaigns] = useState<AffiliateCampaign[]>([]);
   const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
-  const [selectedCampaign, setSelectedCampaign] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [selectedCampaign, setSelectedCampaign] = useState<AffiliateCampaign | null>(null);
   const [generatedLink, setGeneratedLink] = useState('');
   const [copied, setCopied] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -105,28 +107,51 @@ const CreateReferralLinkPage = () => {
 
   const loadCampaigns = async () => {
     setIsLoadingCampaigns(true);
+    setLoadError('');
     try {
-      const f0Code = authService.getF0Code();
-      const assignedCampaigns = await campaignService.getCampaignsForF0(f0Code, 'link');
-      setCampaigns(assignedCampaigns);
+      // Fetch active campaigns from api.affiliate_campaign_settings
+      const activeCampaigns = await affiliateCampaignService.getActiveCampaigns();
+      setCampaigns(activeCampaigns);
+
+      // Auto-select default campaign if exists
+      const defaultCampaign = activeCampaigns.find(c => c.is_default);
+      if (defaultCampaign) {
+        setSelectedCampaignId(defaultCampaign.id);
+        setSelectedCampaign(defaultCampaign);
+      } else if (activeCampaigns.length > 0) {
+        // Select first campaign if no default
+        setSelectedCampaignId(activeCampaigns[0].id);
+        setSelectedCampaign(activeCampaigns[0]);
+      }
     } catch (error) {
       console.error('Error loading campaigns:', error);
-      alert('Lỗi khi tải danh sách campaigns');
+      setLoadError('Lỗi khi tải danh sách chiến dịch. Vui lòng thử lại sau.');
     } finally {
       setIsLoadingCampaigns(false);
     }
   };
 
+  // Handle campaign selection change
+  const handleCampaignChange = (campaignId: string) => {
+    setSelectedCampaignId(campaignId);
+    const campaign = campaigns.find(c => c.id === campaignId);
+    setSelectedCampaign(campaign || null);
+    // Reset generated link when campaign changes
+    setGeneratedLink('');
+    setShowSuccess(false);
+  };
+
   // Generate ref link
   const handleCreateLink = () => {
     if (!selectedCampaign) {
-      alert('Vui lòng chọn campaign');
+      alert('Vui lòng chọn chiến dịch');
       return;
     }
 
-    // Generate link with F0 code as ref
-    const baseUrl = window.location.origin;
-    const link = `${baseUrl}/claim-voucher?ref=${f0Code}&campaign=${selectedCampaign}`;
+    // Generate link with F0 code and campaign_code
+    // Format: https://domain.com/claim-voucher?ref={f0_code}&campaign={campaign_code}
+    const campaignCode = selectedCampaign.campaign_code || selectedCampaign.campaign_id;
+    const link = affiliateCampaignService.generateReferralLink(f0Code, campaignCode);
     setGeneratedLink(link);
     setShowSuccess(true);
   };
@@ -227,17 +252,22 @@ const CreateReferralLinkPage = () => {
                 {/* Campaign Selection */}
                 <div className="space-y-2">
                   <Label htmlFor="campaign">
-                    Chọn Campaign <span className="text-red-500">*</span>
+                    Chọn Chiến Dịch <span className="text-red-500">*</span>
                   </Label>
                   {isLoadingCampaigns ? (
                     <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      Đang tải danh sách campaigns...
+                      Đang tải danh sách chiến dịch...
                     </div>
+                  ) : loadError ? (
+                    <Alert variant="error">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{loadError}</AlertDescription>
+                    </Alert>
                   ) : campaigns.length === 0 ? (
                     <Alert variant="warning">
                       <AlertDescription>
-                        Bạn chưa được gán campaign nào cho phương thức link giới thiệu. Vui lòng liên hệ admin để được hỗ trợ.
+                        Hiện tại chưa có chiến dịch nào đang hoạt động. Vui lòng liên hệ admin để được hỗ trợ.
                       </AlertDescription>
                     </Alert>
                   ) : (
@@ -246,20 +276,26 @@ const CreateReferralLinkPage = () => {
                         <Gift className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <Select
                           id="campaign"
-                          value={selectedCampaign}
-                          onChange={(e) => setSelectedCampaign(e.target.value)}
+                          value={selectedCampaignId}
+                          onChange={(e) => handleCampaignChange(e.target.value)}
                           className="pl-10"
                         >
-                          <option value="">-- Chọn Campaign --</option>
+                          <option value="">-- Chọn Chiến Dịch --</option>
                           {campaigns.map((campaign) => (
                             <option key={campaign.id} value={campaign.id}>
-                              {campaign.name} - {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(campaign.value)}
+                              {campaign.name}
+                              {campaign.is_default && ' (Mặc định)'}
                             </option>
                           ))}
                         </Select>
                       </div>
+                      {selectedCampaign?.description && (
+                        <p className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                          {selectedCampaign.description}
+                        </p>
+                      )}
                       <p className="text-xs text-gray-500">
-                        Chọn campaign để tạo link giới thiệu cho khách hàng của bạn
+                        Chọn chiến dịch để tạo link giới thiệu cho khách hàng của bạn
                       </p>
                     </>
                   )}
@@ -269,7 +305,7 @@ const CreateReferralLinkPage = () => {
                 <Button
                   className="w-full"
                   onClick={handleCreateLink}
-                  disabled={!selectedCampaign || campaigns.length === 0}
+                  disabled={!selectedCampaignId || campaigns.length === 0 || isLoadingCampaigns}
                 >
                   <LinkIcon className="w-4 h-4 mr-2" />
                   Tạo Link Giới Thiệu

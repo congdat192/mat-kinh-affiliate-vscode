@@ -80,10 +80,23 @@ VITE_SUPABASE_URL=your_supabase_url
 | expires_at | TIMESTAMPTZ | Expiration time |
 | is_used | BOOLEAN | Used status |
 
+#### Table: `campaign_settings`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| campaign_id | VARCHAR(50) | ID từ KiotViet |
+| campaign_code | VARCHAR(100) | Mã campaign từ KiotViet |
+| name | VARCHAR(255) | Tên chiến dịch |
+| description | TEXT | Mô tả |
+| is_active | BOOLEAN | TRUE = hiển thị cho F0 |
+| is_default | BOOLEAN | TRUE = auto-select |
+| voucher_image_url | TEXT | URL ảnh voucher |
+
 ### Schema: `api`
 Views exposing `affiliate` tables for API access:
 - `api.f0_partners` → view of `affiliate.f0_partners`
 - `api.otp_verifications` → view of `affiliate.otp_verifications`
+- `api.affiliate_campaign_settings` → view of `affiliate.campaign_settings`
 
 ## Supabase Edge Functions
 
