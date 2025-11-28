@@ -33,60 +33,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { authService } from '@/services/authService';
 import { affiliateCampaignService, type AffiliateCampaign } from '@/services/affiliateCampaignService';
 
-// Mock data for recently created links
-const mockRecentLinks = [
-  {
-    id: 1,
-    name: 'Chiến dịch Tết 2025',
-    link: 'https://matkinhaffiliate.vn/ref/tet2025',
-    code: 'tet2025',
-    createdDate: '2025-11-15',
-    clicks: 234,
-    conversions: 12,
-    status: 'active',
-  },
-  {
-    id: 2,
-    name: 'Khuyến mãi Black Friday',
-    link: 'https://matkinhaffiliate.vn/ref/blackfriday',
-    code: 'blackfriday',
-    createdDate: '2025-11-10',
-    clicks: 456,
-    conversions: 28,
-    status: 'active',
-  },
-  {
-    id: 3,
-    name: 'Giới thiệu bạn bè',
-    link: 'https://matkinhaffiliate.vn/ref/friends2024',
-    code: 'friends2024',
-    createdDate: '2025-11-05',
-    clicks: 189,
-    conversions: 9,
-    status: 'expired',
-  },
-  {
-    id: 4,
-    name: 'Ưu đãi sinh viên',
-    link: 'https://matkinhaffiliate.vn/ref/student',
-    code: 'student',
-    createdDate: '2025-11-01',
-    clicks: 567,
-    conversions: 34,
-    status: 'active',
-  },
-  {
-    id: 5,
-    name: 'Khám mắt miễn phí',
-    link: 'https://matkinhaffiliate.vn/ref/freeeye',
-    code: 'freeeye',
-    createdDate: '2025-10-28',
-    clicks: 823,
-    conversions: 67,
-    status: 'active',
-  },
-];
-
 const CreateReferralLinkPage = () => {
   const [campaigns, setCampaigns] = useState<AffiliateCampaign[]>([]);
   const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
@@ -183,24 +129,6 @@ const CreateReferralLinkPage = () => {
         console.log('Share on Zalo:', generatedLink);
         break;
     }
-  };
-
-  // Format date
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-  };
-
-  // Get status badge
-  const getStatusBadge = (status: string) => {
-    return status === 'active' ? (
-      <Badge variant="success">Hoạt động</Badge>
-    ) : (
-      <Badge variant="default">Hết hạn</Badge>
-    );
   };
 
   return (
@@ -426,80 +354,19 @@ const CreateReferralLinkPage = () => {
           </div>
         </div>
 
-        {/* Recent Links Table */}
+        {/* Recent Links - Empty State (TODO: Implement link history table later) */}
         <Card>
           <CardHeader>
             <CardTitle>Link đã tạo gần đây</CardTitle>
             <CardDescription>Quản lý và theo dõi các link giới thiệu của bạn</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tên chiến dịch</TableHead>
-                    <TableHead>Link</TableHead>
-                    <TableHead>Ngày tạo</TableHead>
-                    <TableHead className="text-center">Lượt click</TableHead>
-                    <TableHead className="text-center">Chuyển đổi</TableHead>
-                    <TableHead className="text-center">Trạng thái</TableHead>
-                    <TableHead className="text-right">Thao tác</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockRecentLinks.map((link) => (
-                    <TableRow key={link.id}>
-                      <TableCell className="font-medium">{link.name}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <code className="text-xs bg-gray-100 px-2 py-1 rounded">
-                            .../{link.code}
-                          </code>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(link.link);
-                            }}
-                          >
-                            <Copy className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-gray-600">
-                        {formatDate(link.createdDate)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-semibold">{link.clicks}</span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="font-semibold text-green-600">{link.conversions}</span>
-                      </TableCell>
-                      <TableCell className="text-center">{getStatusBadge(link.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => window.open(link.link, '_blank')}
-                          >
-                            <ExternalLink className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8 text-red-600 hover:text-red-700"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="text-center py-12">
+              <LinkIcon className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 mb-2">Chưa có link nào được tạo</p>
+              <p className="text-sm text-gray-400">
+                Tạo link giới thiệu đầu tiên của bạn để bắt đầu theo dõi
+              </p>
             </div>
           </CardContent>
         </Card>
