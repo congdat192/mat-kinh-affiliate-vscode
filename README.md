@@ -92,11 +92,25 @@ VITE_SUPABASE_URL=your_supabase_url
 | is_default | BOOLEAN | TRUE = auto-select |
 | voucher_image_url | TEXT | URL ảnh voucher |
 
+#### Table: `referral_links`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_code | VARCHAR(20) | F0 partner code |
+| campaign_setting_id | UUID | FK to campaign_settings |
+| campaign_code | VARCHAR(100) | Campaign code from KiotViet |
+| campaign_name | VARCHAR(255) | Campaign name |
+| full_url | TEXT | Complete referral URL |
+| click_count | INTEGER | Link clicks (default 0) |
+| conversion_count | INTEGER | Conversions (default 0) |
+| is_active | BOOLEAN | Link status |
+
 ### Schema: `api`
 Views exposing `affiliate` tables for API access:
 - `api.f0_partners` → view of `affiliate.f0_partners`
 - `api.otp_verifications` → view of `affiliate.otp_verifications`
 - `api.affiliate_campaign_settings` → view of `affiliate.campaign_settings`
+- `api.referral_links` → view of `affiliate.referral_links`
 
 ## Supabase Edge Functions
 
@@ -123,6 +137,22 @@ Register -> Send OTP (SMS) -> Verify OTP -> Save to DB -> Registration email (pe
                                                               |
                                 Login <- Approval email <- Admin approval
 ```
+
+## Referral Link Flow
+
+```
+F0 selects campaign → Generate link (client-side) → Save to DB for history
+                                    ↓
+        Link: /claim-voucher?ref={f0_code}&campaign={campaign_code}
+                                    ↓
+                        QR Code + Share buttons
+```
+
+**Key Features:**
+- Links generated dynamically using `window.location.origin`
+- UTM params: `ref` (F0 code) + `campaign` (campaign_code)
+- Get-or-create pattern: same F0 + campaign = return existing link
+- F1 claim page validates UTM params (required)
 
 ### Account Status
 
@@ -229,6 +259,8 @@ src/
 - [x] Database schema `affiliate`
 - [x] Table `f0_partners` with triggers
 - [x] Table `otp_verifications`
+- [x] Table `campaign_settings`
+- [x] Table `referral_links`
 - [x] Views in `api` schema (with INSTEAD OF triggers)
 - [x] RPC function `get_vihat_credential()` for encrypted credentials
 - [x] RPC function `get_resend_credential()` for encrypted Resend API key
@@ -238,6 +270,8 @@ src/
 - [x] Edge Function `send-affiliate-registration-email` v1
 - [x] Edge Function `send-affiliate-approval-email` v1
 - [x] Database permissions for service_role on `api` schema views
+- [x] F0 Create Referral Link (client-side UTM generation)
+- [x] ClaimVoucherPage with UTM validation
 - [ ] Row Level Security (RLS)
 
 ### Phase 5: Deployment

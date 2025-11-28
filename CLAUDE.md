@@ -109,6 +109,30 @@ Stores campaign settings for F0 referral links (managed by Admin ERP).
 - Chỉ hiển thị campaigns có `is_active = true`
 - Campaign có `is_default = true` sẽ được auto-select
 
+#### Table: `affiliate.referral_links`
+Stores referral links created by F0 partners for history tracking.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners (nullable) |
+| f0_code | VARCHAR(20) | F0 partner code (e.g., F0-1234) |
+| campaign_setting_id | UUID | FK to campaign_settings |
+| campaign_code | VARCHAR(100) | Campaign code from KiotViet |
+| campaign_name | VARCHAR(255) | Campaign name |
+| full_url | TEXT | Complete referral URL |
+| click_count | INTEGER | Number of link clicks (default 0) |
+| conversion_count | INTEGER | Number of conversions (default 0) |
+| is_active | BOOLEAN | Link status (default true) |
+| created_at | TIMESTAMPTZ | Created date |
+| updated_at | TIMESTAMPTZ | Updated date |
+| last_clicked_at | TIMESTAMPTZ | Last click timestamp |
+
+**Usage:**
+- Links are generated client-side with UTM params: `/claim-voucher?ref={f0_code}&campaign={campaign_code}`
+- Records saved to DB for F0 to view history ("Link đã tạo gần đây")
+- Get-or-create pattern: if link exists for same F0 + campaign, return existing
+
 ### Schema: `api` (IMPORTANT - Primary Access Layer)
 
 **CRITICAL RULE:** All database access in Edge Functions MUST go through schema `api`, NOT directly to source schemas (`affiliate`, `supabaseapi`, `kiotviet`, `vouchers`, etc.).
@@ -135,6 +159,7 @@ await supabase.schema('supabaseapi').from('integration_credentials').select('*')
 | `api.f0_partners` | `affiliate.f0_partners` | Full access |
 | `api.otp_verifications` | `affiliate.otp_verifications` | Full access |
 | `api.affiliate_campaign_settings` | `affiliate.campaign_settings` | Campaign settings for F0 referral links |
+| `api.referral_links` | `affiliate.referral_links` | Referral links history for F0 |
 | `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
 | `api.vihat_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='vihat' |
 | `api.kiotviet_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='kiotviet' |
@@ -447,6 +472,54 @@ Authenticates F0 partner with specific error codes.
 | true | false | Login -> Show "Pending approval" message |
 | false | * | Login -> "Account locked" error |
 
+## Referral Link System
+
+### Link Generation Flow (Client-Side UTM)
+
+```
+F0 selects campaign → Generate link client-side → Save to DB for history
+                                                          ↓
+Link format: /claim-voucher?ref={f0_code}&campaign={campaign_code}
+                                                          ↓
+                                              Display QR Code + Copy button
+```
+
+**Key Points:**
+- Links are generated dynamically using `window.location.origin`
+- UTM params: `ref` (F0 code) + `campaign` (campaign_code from KiotViet)
+- Get-or-create pattern: same F0 + campaign = return existing link
+- Domain auto-updates based on environment (localhost/staging/production)
+
+### F1 Claim Voucher Flow
+
+```
+F1 opens link with UTM → Validate UTM params → Check customer status
+         ↓                      ↓                       ↓
+    /claim-voucher      ref + campaign required    New/Existing check
+         ↓                                               ↓
+    Enter phone/name → Issue voucher via KiotViet API
+```
+
+**Validation:**
+- Link MUST have both `ref` and `campaign` params
+- Invalid/missing params → Show "Link không hợp lệ" error
+- Campaign must exist and be active in `affiliate.campaign_settings`
+
+### Services
+
+| Service | File | Description |
+|---------|------|-------------|
+| `affiliateCampaignService` | `src/services/affiliateCampaignService.ts` | Campaign & referral link operations |
+
+**Key Methods:**
+- `getActiveCampaigns()` - Get campaigns with `is_active = true`
+- `getDefaultCampaign()` - Get campaign with `is_default = true`
+- `getCampaignByCode(code)` - Query by `campaign_code` (not UUID)
+- `createReferralLink(f0Code, campaign)` - Generate + save link
+- `getReferralLinksByF0(f0Code)` - Get F0's link history
+- `deleteReferralLink(linkId, f0Code)` - Delete link (ownership check)
+- `generateReferralLink(f0Code, campaignCode)` - Generate URL string
+
 ## Project Structure
 
 ```
@@ -462,10 +535,11 @@ src/
 │   │   └── ...          # Dashboard, Profile, etc.
 │   └── admin/           # Admin system pages
 ├── services/            # API services
-│   ├── authService.ts   # Authentication service
-│   ├── campaignService.ts
-│   ├── customerService.ts
-│   ├── externalApiService.ts
+│   ├── authService.ts   # Authentication service (F0 user from storage)
+│   ├── affiliateCampaignService.ts  # Campaign & referral link operations (Supabase)
+│   ├── campaignService.ts  # Legacy mock campaign service
+│   ├── customerService.ts  # Customer check service
+│   ├── externalApiService.ts  # KiotViet external API
 │   └── tokenService.ts
 ├── lib/
 │   ├── supabase.ts      # Supabase client (uses 'api' schema)
@@ -531,6 +605,8 @@ src/
 - [x] Database schema `affiliate` created
 - [x] Table `affiliate.f0_partners` created with triggers
 - [x] Table `affiliate.otp_verifications` created
+- [x] Table `affiliate.campaign_settings` created
+- [x] Table `affiliate.referral_links` created
 - [x] Views in `api` schema for API access
 - [x] RPC function `get_vihat_credential()` for encrypted credentials
 - [x] RPC function `get_resend_credential()` for encrypted Resend API key
@@ -544,11 +620,15 @@ src/
 - [x] LoginPage connected to login-affiliate
 - [x] F0 Registration flow fully working (OTP via Zalo/SMS, account creation)
 - [x] Database permissions for `api` schema views (f0_partners, otp_verifications)
+- [x] F0 Create Referral Link page (client-side UTM generation)
+- [x] affiliateCampaignService (Supabase queries for campaigns & referral links)
+- [x] ClaimVoucherPage validates UTM params (ref + campaign required)
 
 ### In Progress
 - [ ] Forgot Password flow
 - [ ] Protected routes implementation
 - [ ] Admin approval workflow (call send-affiliate-approval-email when approving)
+- [ ] ClaimVoucherPage issue voucher via KiotViet API
 
 ### Pending
 - [ ] Row Level Security (RLS) policies

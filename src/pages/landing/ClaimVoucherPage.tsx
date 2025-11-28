@@ -16,10 +16,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { customerService, type CheckCustomerResult } from '@/services/customerService';
-import { campaignService } from '@/services/campaignService';
-import type { Campaign } from '@/types/campaign';
+import { affiliateCampaignService, type AffiliateCampaign } from '@/services/affiliateCampaignService';
 import { BRAND_NAME } from '@/lib/constants';
 
 const ClaimVoucherPage = () => {
@@ -28,10 +27,10 @@ const ClaimVoucherPage = () => {
 
   // Get ref and campaign from URL
   const refCode = searchParams.get('ref');
-  const campaignId = searchParams.get('campaign');
+  const campaignCode = searchParams.get('campaign'); // This is campaign_code, not id
 
   // State
-  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [campaign, setCampaign] = useState<AffiliateCampaign | null>(null);
   const [isLoadingCampaign, setIsLoadingCampaign] = useState(true);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [fullName, setFullName] = useState('');
@@ -45,17 +44,18 @@ const ClaimVoucherPage = () => {
 
   // Load campaign on mount
   useEffect(() => {
-    if (campaignId) {
+    if (campaignCode) {
       loadCampaign();
     } else {
       setIsLoadingCampaign(false);
     }
-  }, [campaignId]);
+  }, [campaignCode]);
 
   const loadCampaign = async () => {
     setIsLoadingCampaign(true);
     try {
-      const campaignData = await campaignService.getCampaignById(campaignId!);
+      // Query campaign by campaign_code (not id)
+      const campaignData = await affiliateCampaignService.getCampaignByCode(campaignCode!);
       setCampaign(campaignData);
     } catch (error) {
       console.error('Error loading campaign:', error);
@@ -130,22 +130,25 @@ const ClaimVoucherPage = () => {
 
     setErrors(newErrors);
 
-    if (Object.keys(newErrors).length === 0 && refCode && campaignId) {
+    if (Object.keys(newErrors).length === 0 && refCode && campaignCode && campaign) {
       setIsClaimingVoucher(true);
 
       try {
-        const issuedVoucher = await campaignService.issueVoucher({
-          campaign_id: campaignId,
+        // TODO: Implement claim voucher via Edge Function
+        // For now, generate a mock voucher code
+        const mockVoucherCode = `VC-${Date.now().toString().slice(-8)}`;
+        setVoucherCode(mockVoucherCode);
+        setIsSuccess(true);
+
+        // Log for debugging
+        console.log('Claim voucher params:', {
+          campaign_id: campaign.id,
+          campaign_code: campaignCode,
           f0_code: refCode,
           f1_phone: phoneNumber,
           f1_name: fullName,
           f1_email: email,
-          issued_via: 'link',
-          ref_code: refCode,
         });
-
-        setVoucherCode(issuedVoucher.voucher_code);
-        setIsSuccess(true);
       } catch (error) {
         console.error('Error claiming voucher:', error);
         alert('Lỗi khi nhận voucher. Vui lòng thử lại.');
@@ -155,16 +158,8 @@ const ClaimVoucherPage = () => {
     }
   };
 
-  // Format currency
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('vi-VN', {
-      style: 'currency',
-      currency: 'VND',
-    }).format(amount);
-  };
-
   // Check if URL params are valid
-  if (!refCode || !campaignId) {
+  if (!refCode || !campaignCode) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -264,10 +259,8 @@ const ClaimVoucherPage = () => {
                       <p className="text-3xl font-bold tracking-wider">{voucherCode}</p>
                     </div>
                     <div className="border-t border-primary-400 pt-4">
-                      <p className="text-2xl font-bold mb-1">
-                        {formatCurrency(campaign.value)}
-                      </p>
-                      <p className="text-sm opacity-90">Giá trị ưu đãi</p>
+                      <p className="text-lg font-bold mb-1">{campaign.name}</p>
+                      <p className="text-sm opacity-90">Chiến dịch ưu đãi</p>
                     </div>
                   </div>
                 </div>
@@ -275,8 +268,8 @@ const ClaimVoucherPage = () => {
                 <Alert>
                   <CheckCircle className="h-4 w-4" />
                   <AlertDescription>
-                    Voucher có hiệu lực trong <strong>{campaign.validity_days} ngày</strong>.
-                    Hãy sử dụng ngay để được giảm giá cho đơn hàng đầu tiên của bạn!
+                    Voucher đã được gửi thành công!
+                    Hãy sử dụng ngay để được giảm giá cho đơn hàng của bạn!
                   </AlertDescription>
                 </Alert>
 
@@ -307,15 +300,18 @@ const ClaimVoucherPage = () => {
                   <div className="text-center space-y-3">
                     <Gift className="w-12 h-12 mx-auto opacity-90" />
                     <div>
-                      <p className="text-sm opacity-90">Giảm giá</p>
-                      <p className="text-4xl font-bold">{formatCurrency(campaign.value)}</p>
+                      <p className="text-sm opacity-90">Chiến dịch</p>
+                      <p className="text-2xl font-bold">{campaign.name}</p>
                     </div>
-                    <div className="border-t border-primary-400 pt-3">
-                      <p className="text-sm opacity-90">{campaign.name}</p>
-                      <p className="text-xs opacity-75 mt-1">
-                        Hiệu lực {campaign.validity_days} ngày
-                      </p>
-                    </div>
+                    {campaign.voucher_image_url && (
+                      <div className="border-t border-primary-400 pt-3">
+                        <img
+                          src={campaign.voucher_image_url}
+                          alt="Voucher"
+                          className="w-full rounded-lg"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
