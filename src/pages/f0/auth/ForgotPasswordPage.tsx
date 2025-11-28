@@ -3,41 +3,78 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, ArrowLeft } from 'lucide-react';
+import { CheckCircle, ArrowLeft, AlertCircle } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export default function ForgotPasswordPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [contactType, setContactType] = useState<'email' | 'phone'>('email');
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
 
-  const detectContactType = (value: string) => {
-    // Simple detection: if it's all digits and starts with 0, it's a phone number
-    if (/^0\d+$/.test(value)) {
-      setContactType('phone');
-    } else {
-      setContactType('email');
-    }
-  };
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setEmailOrPhone(value);
-    if (value) {
-      detectContactType(value);
-    }
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+
+    // Validate email
+    if (!email.trim()) {
+      setError('Vui lòng nhập email');
+      return;
+    }
+
+    if (!validateEmail(email)) {
+      setError('Email không hợp lệ');
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const baseUrl = window.location.origin;
+
+      console.log('Sending forgot password request:', { email: email.trim().toLowerCase(), baseUrl });
+
+      const { data, error: fnError } = await supabase.functions.invoke('forgot-password-affiliate', {
+        body: { email: email.trim().toLowerCase(), baseUrl }
+      });
+
+      console.log('Response from Edge Function:', { data, fnError });
+
+      if (fnError) {
+        console.error('Edge Function error:', fnError);
+        throw fnError;
+      }
+
+      if (!data.success) {
+        // Handle specific error codes
+        switch (data.error_code) {
+          case 'EMAIL_NOT_FOUND':
+            setError('Email này chưa được đăng ký trong hệ thống');
+            break;
+          case 'RATE_LIMIT':
+            setError('Vui lòng đợi 1 phút trước khi yêu cầu lại');
+            break;
+          case 'EMAIL_SEND_FAILED':
+            setError('Không thể gửi email. Vui lòng thử lại sau');
+            break;
+          default:
+            setError(data.message || 'Có lỗi xảy ra');
+        }
+        return;
+      }
+
       setIsSuccess(true);
-      console.log('Reset link sent to:', emailOrPhone);
-    }, 1500);
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      setError('Có lỗi xảy ra. Vui lòng thử lại sau');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleBackToLogin = () => {
@@ -46,7 +83,8 @@ export default function ForgotPasswordPage() {
 
   const handleTryAgain = () => {
     setIsSuccess(false);
-    setEmailOrPhone('');
+    setEmail('');
+    setError('');
   };
 
   return (
@@ -64,21 +102,29 @@ export default function ForgotPasswordPage() {
               <CardHeader>
                 <CardTitle>Quên mật khẩu</CardTitle>
                 <CardDescription>
-                  Nhập email hoặc số điện thoại của bạn để nhận liên kết đặt lại mật khẩu
+                  Nhập email của bạn để nhận liên kết đặt lại mật khẩu
                 </CardDescription>
               </CardHeader>
 
               <form onSubmit={handleSubmit}>
                 <CardContent className="space-y-4">
-                  {/* Email/Phone Input */}
+                  {/* Error Message */}
+                  {error && (
+                    <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0" />
+                      <p className="text-sm text-red-600">{error}</p>
+                    </div>
+                  )}
+
+                  {/* Email Input */}
                   <div className="space-y-2">
-                    <Label htmlFor="emailOrPhone">Email hoặc Số điện thoại</Label>
+                    <Label htmlFor="email">Email</Label>
                     <Input
-                      id="emailOrPhone"
-                      type="text"
-                      placeholder="Nhập email hoặc số điện thoại"
-                      value={emailOrPhone}
-                      onChange={handleInputChange}
+                      id="email"
+                      type="email"
+                      placeholder="Nhập email đã đăng ký"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
                       required
                     />
                   </div>
@@ -114,17 +160,8 @@ export default function ForgotPasswordPage() {
                   <div>
                     <CardTitle className="text-green-600">Gửi thành công!</CardTitle>
                     <CardDescription className="mt-2">
-                      {contactType === 'email' ? (
-                        <>
-                          Chúng tôi đã gửi liên kết đặt lại mật khẩu đến email{' '}
-                          <span className="font-medium text-gray-900">{emailOrPhone}</span>
-                        </>
-                      ) : (
-                        <>
-                          Chúng tôi đã gửi mã đặt lại mật khẩu đến số điện thoại{' '}
-                          <span className="font-medium text-gray-900">{emailOrPhone}</span>
-                        </>
-                      )}
+                      Chúng tôi đã gửi liên kết đặt lại mật khẩu đến email{' '}
+                      <span className="font-medium text-gray-900">{email}</span>
                     </CardDescription>
                   </div>
                 </div>
@@ -133,15 +170,13 @@ export default function ForgotPasswordPage() {
               <CardContent className="space-y-4">
                 <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
                   <p className="text-sm text-blue-800">
-                    <strong>Lưu ý:</strong> Vui lòng kiểm tra{' '}
-                    {contactType === 'email' ? 'hộp thư đến và thư mục spam' : 'tin nhắn SMS'}{' '}
-                    của bạn. Liên kết sẽ hết hạn sau 15 phút.
+                    <strong>Lưu ý:</strong> Vui lòng kiểm tra hộp thư đến và thư mục spam của bạn. Liên kết sẽ hết hạn sau 15 phút.
                   </p>
                 </div>
 
                 <div className="space-y-2">
                   <p className="text-sm text-gray-600 text-center">
-                    Không nhận được {contactType === 'email' ? 'email' : 'tin nhắn'}?
+                    Không nhận được email?
                   </p>
                   <Button
                     type="button"
@@ -149,7 +184,7 @@ export default function ForgotPasswordPage() {
                     className="w-full"
                     onClick={handleTryAgain}
                   >
-                    Thử lại với {contactType === 'email' ? 'email' : 'số điện thoại'} khác
+                    Thử lại với email khác
                   </Button>
                 </div>
 

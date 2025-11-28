@@ -92,6 +92,16 @@ VITE_SUPABASE_URL=your_supabase_url
 | is_default | BOOLEAN | TRUE = auto-select |
 | voucher_image_url | TEXT | URL ảnh voucher |
 
+#### Table: `password_resets`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| email | VARCHAR(255) | Email address |
+| token | VARCHAR(255) | UUID reset token |
+| expires_at | TIMESTAMPTZ | Expiration (15 min) |
+| is_used | BOOLEAN | Used status |
+
 #### Table: `referral_links`
 | Column | Type | Description |
 |--------|------|-------------|
@@ -109,6 +119,7 @@ VITE_SUPABASE_URL=your_supabase_url
 Views exposing `affiliate` tables for API access:
 - `api.f0_partners` → view of `affiliate.f0_partners`
 - `api.otp_verifications` → view of `affiliate.otp_verifications`
+- `api.password_resets` → view of `affiliate.password_resets`
 - `api.affiliate_campaign_settings` → view of `affiliate.campaign_settings`
 - `api.referral_links` → view of `affiliate.referral_links`
 
@@ -119,6 +130,8 @@ Views exposing `affiliate` tables for API access:
 | `send-otp-affiliate` | v12 | Send OTP via Vihat MultiChannelMessage API (Zalo + SMS fallback) |
 | `verify-otp-affiliate` | v18 | Verify OTP, create F0 partner account, call registration email |
 | `login-affiliate` | v13 | Authenticate F0 partner (SHA-256 password, specific error codes) |
+| `forgot-password-affiliate` | v4 | Send password reset email (15 min expiry, 1 min rate limit) |
+| `reset-password-affiliate` | v1 | Reset password using token from email link |
 | `send-affiliate-registration-email` | v1 | Send registration confirmation email (pending approval) |
 | `send-affiliate-approval-email` | v1 | Send account activation email (after admin approval) |
 
@@ -200,6 +213,7 @@ src/
 | `/f0/auth/signup` | Registration |
 | `/f0/auth/otp` | OTP verification |
 | `/f0/auth/forgot-password` | Forgot password |
+| `/f0/auth/reset-password` | Reset password (token) |
 
 ### F0 System
 | Route | Page |
@@ -269,6 +283,10 @@ src/
 - [x] Edge Function `login-affiliate` v13 (specific error codes)
 - [x] Edge Function `send-affiliate-registration-email` v1
 - [x] Edge Function `send-affiliate-approval-email` v1
+- [x] Edge Function `forgot-password-affiliate` v4
+- [x] Edge Function `reset-password-affiliate` v1
+- [x] Table `password_resets` with INSTEAD OF triggers
+- [x] Forgot Password flow (ForgotPasswordPage + ResetPasswordPage)
 - [x] Database permissions for service_role on `api` schema views
 - [x] F0 Create Referral Link (client-side UTM generation)
 - [x] ClaimVoucherPage with UTM validation
@@ -297,4 +315,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 2 Complete (F0 Registration Working) | Phase 3 In Progress
+**Status**: Phase 2 Complete (F0 Registration + Forgot Password Working) | Phase 3 In Progress

@@ -13,6 +13,7 @@ import LoginPage from '@/pages/f0/auth/LoginPage';
 import SignupPage from '@/pages/f0/auth/SignupPage';
 import OTPPage from '@/pages/f0/auth/OTPPage';
 import ForgotPasswordPage from '@/pages/f0/auth/ForgotPasswordPage';
+import ResetPasswordPage from '@/pages/f0/auth/ResetPasswordPage';
 
 // F0 Pages
 import F0DashboardPage from '@/pages/f0/DashboardPage';
@@ -54,6 +55,7 @@ function App() {
         <Route path="/f0/auth/signup" element={<SignupPage />} />
         <Route path="/f0/auth/otp" element={<OTPPage />} />
         <Route path="/f0/auth/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/f0/auth/reset-password" element={<ResetPasswordPage />} />
 
         {/* F0 Pages (With Layout) */}
         <Route path="/f0" element={<F0Layout />}>

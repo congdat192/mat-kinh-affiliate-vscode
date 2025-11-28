@@ -109,6 +109,25 @@ Stores campaign settings for F0 referral links (managed by Admin ERP).
 - Chỉ hiển thị campaigns có `is_active = true`
 - Campaign có `is_default = true` sẽ được auto-select
 
+#### Table: `affiliate.password_resets`
+Stores password reset tokens for F0 partners.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| email | VARCHAR(255) | Email address |
+| token | VARCHAR(255) | UUID reset token (unique) |
+| expires_at | TIMESTAMPTZ | Token expiration (default: 15 min) |
+| is_used | BOOLEAN | Whether token has been used |
+| created_at | TIMESTAMPTZ | Created date |
+| used_at | TIMESTAMPTZ | When token was used |
+
+**Notes:**
+- Token expires in 15 minutes (set by database default)
+- Rate limit: 1 token per email per minute (enforced in Edge Function)
+- View: `api.password_resets` with INSTEAD OF triggers
+
 #### Table: `affiliate.referral_links`
 Stores referral links created by F0 partners for history tracking.
 
@@ -158,6 +177,7 @@ await supabase.schema('supabaseapi').from('integration_credentials').select('*')
 |------|--------|-------|
 | `api.f0_partners` | `affiliate.f0_partners` | Full access |
 | `api.otp_verifications` | `affiliate.otp_verifications` | Full access |
+| `api.password_resets` | `affiliate.password_resets` | Password reset tokens |
 | `api.affiliate_campaign_settings` | `affiliate.campaign_settings` | Campaign settings for F0 referral links |
 | `api.referral_links` | `affiliate.referral_links` | Referral links history for F0 |
 | `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
@@ -363,6 +383,78 @@ Sends account activation email when admin approves F0 partner.
 3. Send email via Resend API
 4. Sender: `Mắt Kính Tâm Đức <affiliate@matkinhtamduc.com>`
 
+### `forgot-password-affiliate` (v4)
+Sends password reset email to F0 partner.
+
+**Request:**
+```json
+{
+  "email": "user@email.com",
+  "baseUrl": "https://matkinhtamduc.com"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Đã gửi email đặt lại mật khẩu",
+  "email_masked": "us***@email.com"
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `MISSING_EMAIL` | Email empty | Vui lòng nhập email |
+| `INVALID_EMAIL` | Invalid email format | Email không hợp lệ |
+| `EMAIL_NOT_FOUND` | Email not registered | Email không tồn tại trong hệ thống |
+| `RATE_LIMIT` | Token created < 1 min ago | Vui lòng đợi 1 phút trước khi gửi lại |
+
+**Flow:**
+1. Validate email format
+2. Check if user exists in `api.f0_partners`
+3. Check rate limit (1 token per minute)
+4. Generate UUID token, save to `api.password_resets`
+5. Get Resend credentials via `get_resend_credential()` RPC (returns array!)
+6. Decrypt API key using `RESEND_API_KEY` (encryption key from ENV)
+7. Send reset email with link: `{baseUrl}/f0/auth/reset-password?token={token}`
+8. Token expires in 15 minutes
+
+### `reset-password-affiliate` (v1)
+Resets password using token from email link.
+
+**Request:**
+```json
+{
+  "token": "uuid-token-from-email",
+  "new_password": "newPassword123"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Đặt lại mật khẩu thành công"
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `INVALID_TOKEN` | Token not found | Liên kết không hợp lệ hoặc đã hết hạn |
+| `TOKEN_USED` | Token already used | Liên kết này đã được sử dụng |
+| `TOKEN_EXPIRED` | Token expired (15 min) | Liên kết đã hết hạn |
+| `WEAK_PASSWORD` | Password < 6 chars | Mật khẩu phải có ít nhất 6 ký tự |
+
+**Flow:**
+1. Find token in `api.password_resets`
+2. Validate: not used, not expired
+3. Hash new password (SHA-256)
+4. Update password in `api.f0_partners`
+5. Mark token as used
+
 ### `login-affiliate` (v13)
 Authenticates F0 partner with specific error codes.
 
@@ -561,7 +653,8 @@ src/
 - `/f0/auth/login` - Login
 - `/f0/auth/signup` - Registration
 - `/f0/auth/otp` - OTP verification
-- `/f0/auth/forgot-password` - Forgot password
+- `/f0/auth/forgot-password` - Forgot password (request reset email)
+- `/f0/auth/reset-password` - Reset password (from email link with token)
 
 ### F0 System (With F0Layout)
 - `/f0/dashboard` - Dashboard
@@ -615,6 +708,11 @@ src/
 - [x] Edge Function `login-affiliate` v13 (SHA-256 password verification, specific error codes)
 - [x] Edge Function `send-affiliate-registration-email` v1 (pending approval email)
 - [x] Edge Function `send-affiliate-approval-email` v1 (account activated email)
+- [x] Edge Function `forgot-password-affiliate` v4 (sends reset email)
+- [x] Edge Function `reset-password-affiliate` v1 (resets password with token)
+- [x] Table `affiliate.password_resets` with view and INSTEAD OF triggers
+- [x] ForgotPasswordPage connected to forgot-password-affiliate
+- [x] ResetPasswordPage connected to reset-password-affiliate
 - [x] SignupPage connected to send-otp-affiliate
 - [x] OTPPage connected to verify-otp-affiliate
 - [x] LoginPage connected to login-affiliate
@@ -625,7 +723,6 @@ src/
 - [x] ClaimVoucherPage validates UTM params (ref + campaign required)
 
 ### In Progress
-- [ ] Forgot Password flow
 - [ ] Protected routes implementation
 - [ ] Admin approval workflow (call send-affiliate-approval-email when approving)
 - [ ] ClaimVoucherPage issue voucher via KiotViet API
