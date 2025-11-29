@@ -43,6 +43,19 @@ interface F0User {
   bank_account_number?: string;
   bank_account_holder?: string;
   bank_branch?: string;
+  bank_verified?: boolean;
+  bank_verified_at?: string;
+}
+
+// OTP Modal state interface
+interface OtpModalState {
+  isOpen: boolean;
+  recordId: string;
+  phoneMasked: string;
+  expiresIn: number;
+  otpValue: string;
+  isVerifying: boolean;
+  countdown: number;
 }
 
 // Default empty user data structure
@@ -59,9 +72,22 @@ const getDefaultUserData = (f0User: F0User | null) => ({
   accountNumber: f0User?.bank_account_number || '',
   accountHolder: f0User?.bank_account_holder || '',
   branch: f0User?.bank_branch || '',
+  bankVerified: f0User?.bank_verified || false,
+  bankVerifiedAt: f0User?.bank_verified_at || '',
   currentTier: 'silver', // Default tier
   twoFactorEnabled: false,
 });
+
+// Initial OTP modal state
+const initialOtpModalState: OtpModalState = {
+  isOpen: false,
+  recordId: '',
+  phoneMasked: '',
+  expiresIn: 300,
+  otpValue: '',
+  isVerifying: false,
+  countdown: 0,
+};
 
 // Vietnam banks list
 const vietnamBanks = [
@@ -101,7 +127,7 @@ const ProfilePage = () => {
         // Fetch latest profile data from database
         const { data: profileData, error } = await supabase
           .from('f0_partners')
-          .select('avatar_url, date_of_birth, gender, address, bank_name, bank_account_number, bank_account_holder, bank_branch')
+          .select('avatar_url, date_of_birth, gender, address, bank_name, bank_account_number, bank_account_holder, bank_branch, bank_verified, bank_verified_at')
           .eq('id', parsedUser.id)
           .single();
 
@@ -137,6 +163,8 @@ const ProfilePage = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [otpModal, setOtpModal] = useState<OtpModalState>(initialOtpModalState);
+  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Password form state
   const [passwordForm, setPasswordForm] = useState({
@@ -298,24 +326,236 @@ const ProfilePage = () => {
 
   // Handle personal info save
   const handleSavePersonalInfo = async () => {
+    if (!f0User) return;
+
     setLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const { error } = await supabase
+        .from('f0_partners')
+        .update({
+          date_of_birth: userData.dateOfBirth || null,
+          gender: userData.gender || null,
+          address: userData.address || null,
+        })
+        .eq('id', f0User.id);
+
+      if (error) {
+        console.error('Error saving personal info:', error);
+        toast.error('Lỗi khi lưu thông tin. Vui lòng thử lại.');
+        return;
+      }
+
+      // Update local storage
+      const updatedUser = {
+        ...f0User,
+        date_of_birth: userData.dateOfBirth || null,
+        gender: userData.gender || null,
+        address: userData.address || null,
+      };
+      setF0User(updatedUser);
+      if (localStorage.getItem('f0_user')) {
+        localStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      } else {
+        sessionStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      }
+
       toast.success('Thông tin cá nhân đã được cập nhật thành công!');
-    }, 1000);
+    } catch (error) {
+      console.error('Error saving personal info:', error);
+      toast.error('Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Handle bank info save
+  // Handle bank info save - sends OTP for verification
   const handleSaveBankInfo = async () => {
+    if (!f0User) return;
+
+    // Check if already verified
+    if (userData.bankVerified) {
+      toast.error('Thông tin ngân hàng đã được xác minh. Vui lòng liên hệ Admin nếu cần thay đổi.');
+      return;
+    }
+
+    // Validate required fields
+    if (!userData.bankName || !userData.accountNumber || !userData.accountHolder) {
+      toast.error('Vui lòng điền đầy đủ thông tin ngân hàng bắt buộc');
+      return;
+    }
+
     setLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Call Edge Function to send OTP
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-otp-bank-verification`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            f0_id: f0User.id,
+            bank_name: userData.bankName,
+            bank_account_number: userData.accountNumber,
+            bank_account_holder: userData.accountHolder,
+            bank_branch: userData.branch || null,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || 'Không thể gửi mã OTP');
+        return;
+      }
+
+      // Open OTP modal
+      setOtpModal({
+        isOpen: true,
+        recordId: result.record_id,
+        phoneMasked: result.phone_masked,
+        expiresIn: result.expires_in,
+        otpValue: '',
+        isVerifying: false,
+        countdown: result.expires_in,
+      });
+
+      toast.success(`Mã OTP đã được gửi đến số ${result.phone_masked}`);
+
+    } catch (error) {
+      console.error('Error sending OTP:', error);
+      toast.error('Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
       setLoading(false);
-      toast.success('Thông tin ngân hàng đã được cập nhật thành công!');
+    }
+  };
+
+  // Handle OTP input change
+  const handleOtpChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return; // Only allow digits
+
+    const newOtp = otpModal.otpValue.split('');
+    newOtp[index] = value;
+    const newOtpString = newOtp.join('').slice(0, 6);
+
+    setOtpModal({ ...otpModal, otpValue: newOtpString });
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  // Handle OTP input keydown (for backspace)
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace' && !otpModal.otpValue[index] && index > 0) {
+      otpInputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // Handle OTP verification
+  const handleVerifyOtp = async () => {
+    if (!f0User || otpModal.otpValue.length !== 6) {
+      toast.error('Vui lòng nhập đầy đủ 6 số OTP');
+      return;
+    }
+
+    setOtpModal({ ...otpModal, isVerifying: true });
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-otp-bank`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            record_id: otpModal.recordId,
+            phone: f0User.phone,
+            otp: otpModal.otpValue,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || 'Xác thực OTP thất bại');
+        setOtpModal({ ...otpModal, isVerifying: false });
+        return;
+      }
+
+      // Update local state with verified bank info
+      const updatedUserData = {
+        ...userData,
+        bankName: result.bank_info.bank_name,
+        accountNumber: result.bank_info.bank_account_number,
+        accountHolder: result.bank_info.bank_account_holder,
+        branch: result.bank_info.bank_branch || '',
+        bankVerified: true,
+        bankVerifiedAt: result.bank_info.bank_verified_at,
+      };
+      setUserData(updatedUserData);
+
+      // Update f0User and storage
+      const updatedUser = {
+        ...f0User,
+        bank_name: result.bank_info.bank_name,
+        bank_account_number: result.bank_info.bank_account_number,
+        bank_account_holder: result.bank_info.bank_account_holder,
+        bank_branch: result.bank_info.bank_branch,
+        bank_verified: true,
+        bank_verified_at: result.bank_info.bank_verified_at,
+      };
+      setF0User(updatedUser);
+      if (localStorage.getItem('f0_user')) {
+        localStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      } else {
+        sessionStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      }
+
+      // Close modal and show success
+      setOtpModal(initialOtpModalState);
+      toast.success('Xác minh tài khoản ngân hàng thành công! Email thông báo đã được gửi.');
+
+    } catch (error) {
+      console.error('Error verifying OTP:', error);
+      toast.error('Có lỗi xảy ra. Vui lòng thử lại.');
+      setOtpModal({ ...otpModal, isVerifying: false });
+    }
+  };
+
+  // Close OTP modal
+  const handleCloseOtpModal = () => {
+    setOtpModal(initialOtpModalState);
+  };
+
+  // Countdown effect for OTP expiry
+  useEffect(() => {
+    if (!otpModal.isOpen || otpModal.countdown <= 0) return;
+
+    const timer = setInterval(() => {
+      setOtpModal(prev => ({
+        ...prev,
+        countdown: Math.max(0, prev.countdown - 1)
+      }));
     }, 1000);
+
+    return () => clearInterval(timer);
+  }, [otpModal.isOpen, otpModal.countdown]);
+
+  // Format countdown time
+  const formatCountdown = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   // Handle password change
@@ -614,83 +854,145 @@ const ProfilePage = () => {
           <TabsContent value="bank">
             <Card>
               <CardHeader>
-                <CardTitle>Thông tin ngân hàng</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  Thông tin ngân hàng
+                  {userData.bankVerified && (
+                    <Badge variant="success" className="ml-2">
+                      <Shield className="w-3 h-3 mr-1" />
+                      Đã xác minh
+                    </Badge>
+                  )}
+                </CardTitle>
                 <CardDescription>
-                  Cập nhật thông tin tài khoản ngân hàng để nhận thanh toán hoa hồng
+                  {userData.bankVerified
+                    ? 'Thông tin ngân hàng đã được xác minh và khóa. Liên hệ Admin nếu cần thay đổi.'
+                    : 'Cập nhật thông tin tài khoản ngân hàng để nhận thanh toán hoa hồng'
+                  }
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Important Notice */}
-                <Alert variant="warning">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Lưu ý quan trọng</AlertTitle>
-                  <AlertDescription>
-                    <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
-                      <li>Bạn chỉ được đăng ký <strong>01 tài khoản ngân hàng duy nhất</strong> để nhận hoa hồng</li>
-                      <li>Tên chủ tài khoản <strong>phải trùng khớp</strong> với họ tên đăng ký tài khoản F0</li>
-                      <li>Sau khi thông tin được xác minh, bạn <strong>không thể tự thay đổi</strong>. Vui lòng liên hệ Admin nếu cần cập nhật</li>
-                      <li>Hoa hồng sẽ được chuyển vào tài khoản này theo chu kỳ thanh toán hàng tháng</li>
-                    </ul>
-                  </AlertDescription>
-                </Alert>
+                {/* Important Notice - only show if not verified */}
+                {!userData.bankVerified && (
+                  <Alert variant="warning">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Lưu ý quan trọng</AlertTitle>
+                    <AlertDescription>
+                      <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
+                        <li>Bạn chỉ được đăng ký <strong>01 tài khoản ngân hàng duy nhất</strong> để nhận hoa hồng</li>
+                        <li>Tên chủ tài khoản <strong>phải trùng khớp</strong> với họ tên đăng ký tài khoản F0</li>
+                        <li>Sau khi xác minh OTP, thông tin sẽ <strong>bị khóa vĩnh viễn</strong>. Vui lòng kiểm tra kỹ trước khi xác nhận</li>
+                        <li>Hoa hồng sẽ được chuyển vào tài khoản này theo chu kỳ thanh toán hàng tháng</li>
+                      </ul>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Verified Notice - show when verified */}
+                {userData.bankVerified && (
+                  <Alert variant="success">
+                    <Shield className="h-4 w-4" />
+                    <AlertTitle>Tài khoản đã được xác minh</AlertTitle>
+                    <AlertDescription>
+                      Thông tin ngân hàng đã được xác minh vào{' '}
+                      {userData.bankVerifiedAt && new Date(userData.bankVerifiedAt).toLocaleDateString('vi-VN', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}.
+                      Nếu cần thay đổi thông tin, vui lòng liên hệ Admin.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Bank Name */}
                 <div className="space-y-2">
                   <Label htmlFor="bankName">Ngân hàng</Label>
-                  <Select
-                    id="bankName"
-                    value={userData.bankName}
-                    onChange={(e) =>
-                      setUserData({ ...userData, bankName: e.target.value })
-                    }
-                  >
-                    <option value="">Chọn ngân hàng</option>
-                    {vietnamBanks.map((bank) => (
-                      <option key={bank.value} value={bank.value}>
-                        {bank.label}
-                      </option>
-                    ))}
-                  </Select>
+                  <div className="relative">
+                    <Select
+                      id="bankName"
+                      value={userData.bankName}
+                      onChange={(e) =>
+                        setUserData({ ...userData, bankName: e.target.value })
+                      }
+                      disabled={userData.bankVerified}
+                      className={userData.bankVerified ? 'bg-gray-50 cursor-not-allowed' : ''}
+                    >
+                      <option value="">Chọn ngân hàng</option>
+                      {vietnamBanks.map((bank) => (
+                        <option key={bank.value} value={bank.value}>
+                          {bank.label}
+                        </option>
+                      ))}
+                    </Select>
+                    {userData.bankVerified && (
+                      <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    )}
+                  </div>
                 </div>
 
                 {/* Account Number */}
                 <div className="space-y-2">
                   <Label htmlFor="accountNumber">Số tài khoản</Label>
-                  <Input
-                    id="accountNumber"
-                    value={userData.accountNumber}
-                    onChange={(e) =>
-                      setUserData({ ...userData, accountNumber: e.target.value })
-                    }
-                    placeholder="Nhập số tài khoản"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="accountNumber"
+                      value={userData.accountNumber}
+                      onChange={(e) =>
+                        setUserData({ ...userData, accountNumber: e.target.value })
+                      }
+                      placeholder="Nhập số tài khoản"
+                      readOnly={userData.bankVerified}
+                      className={userData.bankVerified ? 'bg-gray-50 cursor-not-allowed' : ''}
+                    />
+                    {userData.bankVerified && (
+                      <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    )}
+                  </div>
                 </div>
 
                 {/* Account Holder */}
                 <div className="space-y-2">
                   <Label htmlFor="accountHolder">Tên chủ tài khoản</Label>
-                  <Input
-                    id="accountHolder"
-                    value={userData.accountHolder}
-                    onChange={(e) =>
-                      setUserData({ ...userData, accountHolder: e.target.value })
-                    }
-                    placeholder="NGUYEN VAN A"
-                    className="uppercase"
-                  />
-                  <p className="text-xs text-gray-500">
-                    Tên chủ tài khoản phải viết hoa, không dấu
-                  </p>
+                  <div className="relative">
+                    <Input
+                      id="accountHolder"
+                      value={userData.accountHolder}
+                      onChange={(e) =>
+                        setUserData({ ...userData, accountHolder: e.target.value })
+                      }
+                      placeholder="NGUYEN VAN A"
+                      className={`uppercase ${userData.bankVerified ? 'bg-gray-50 cursor-not-allowed' : ''}`}
+                      readOnly={userData.bankVerified}
+                    />
+                    {userData.bankVerified && (
+                      <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    )}
+                  </div>
+                  {!userData.bankVerified && (
+                    <p className="text-xs text-gray-500">
+                      Tên chủ tài khoản phải viết hoa, không dấu
+                    </p>
+                  )}
                 </div>
 
                 {/* Branch */}
                 <div className="space-y-2">
                   <Label htmlFor="branch">Chi nhánh (Tùy chọn)</Label>
-                  <Input
-                    id="branch"
-                    value={userData.branch}
-                    onChange={(e) => setUserData({ ...userData, branch: e.target.value })}
-                    placeholder="Nhập tên chi nhánh"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="branch"
+                      value={userData.branch}
+                      onChange={(e) => setUserData({ ...userData, branch: e.target.value })}
+                      placeholder="Nhập tên chi nhánh"
+                      readOnly={userData.bankVerified}
+                      className={userData.bankVerified ? 'bg-gray-50 cursor-not-allowed' : ''}
+                    />
+                    {userData.bankVerified && (
+                      <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    )}
+                  </div>
                 </div>
 
                 {/* Security Note */}
@@ -703,30 +1005,64 @@ const ProfilePage = () => {
                   </AlertDescription>
                 </Alert>
 
-                {/* Verification Status Note */}
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                {/* Verification Status */}
+                <div className={`border rounded-lg p-4 ${userData.bankVerified ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
                   <div className="flex items-start gap-3">
-                    <div className="bg-gray-200 rounded-full p-2">
-                      <CreditCard className="w-4 h-4 text-gray-600" />
+                    <div className={`rounded-full p-2 ${userData.bankVerified ? 'bg-green-200' : 'bg-gray-200'}`}>
+                      <CreditCard className={`w-4 h-4 ${userData.bankVerified ? 'text-green-600' : 'text-gray-600'}`} />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium text-gray-900">Trạng thái xác minh</p>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Thông tin ngân hàng của bạn sẽ được Admin xác minh trong vòng 24-48 giờ làm việc sau khi cập nhật.
+                      <p className={`font-medium ${userData.bankVerified ? 'text-green-900' : 'text-gray-900'}`}>
+                        Trạng thái xác minh
                       </p>
-                      <Badge variant="warning" className="mt-2">Chưa xác minh</Badge>
+                      <p className={`text-sm mt-1 ${userData.bankVerified ? 'text-green-700' : 'text-gray-600'}`}>
+                        {userData.bankVerified
+                          ? 'Tài khoản ngân hàng đã được xác minh qua OTP. Thông tin đã bị khóa.'
+                          : 'Sau khi điền thông tin, bạn sẽ nhận mã OTP qua SMS để xác minh.'
+                        }
+                      </p>
+                      <Badge
+                        variant={userData.bankVerified ? 'success' : 'warning'}
+                        className="mt-2"
+                      >
+                        {userData.bankVerified ? 'Đã xác minh' : 'Chưa xác minh'}
+                      </Badge>
                     </div>
                   </div>
                 </div>
 
-                {/* Save Button */}
-                <Button
-                  onClick={handleSaveBankInfo}
-                  disabled={loading}
-                  className="w-full md:w-auto"
-                >
-                  {loading ? 'Đang lưu...' : 'Lưu thông tin ngân hàng'}
-                </Button>
+                {/* Save Button - only show if not verified */}
+                {!userData.bankVerified && (
+                  <Button
+                    onClick={handleSaveBankInfo}
+                    disabled={loading}
+                    className="w-full md:w-auto"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Đang gửi OTP...
+                      </>
+                    ) : (
+                      <>
+                        <Smartphone className="w-4 h-4 mr-2" />
+                        Xác minh qua OTP
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                {/* Contact Admin button - show when verified */}
+                {userData.bankVerified && (
+                  <div className="text-center">
+                    <p className="text-sm text-gray-500 mb-2">
+                      Cần thay đổi thông tin ngân hàng?
+                    </p>
+                    <Button variant="outline" size="sm">
+                      Liên hệ Admin
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -973,6 +1309,99 @@ const ProfilePage = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* OTP Verification Modal */}
+      {otpModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-4">
+              <h3 className="text-xl font-bold text-white">Xác minh OTP</h3>
+              <p className="text-primary-100 text-sm mt-1">
+                Nhập mã OTP đã gửi đến số {otpModal.phoneMasked}
+              </p>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 space-y-6">
+              {/* Countdown */}
+              <div className="text-center">
+                {otpModal.countdown > 0 ? (
+                  <p className="text-sm text-gray-600">
+                    Mã OTP có hiệu lực trong{' '}
+                    <span className="font-semibold text-primary-600">
+                      {formatCountdown(otpModal.countdown)}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-sm text-red-600 font-medium">
+                    Mã OTP đã hết hạn. Vui lòng đóng và thử lại.
+                  </p>
+                )}
+              </div>
+
+              {/* OTP Input */}
+              <div className="flex justify-center gap-2">
+                {[0, 1, 2, 3, 4, 5].map((index) => (
+                  <input
+                    key={index}
+                    ref={(el) => (otpInputRefs.current[index] = el)}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={otpModal.otpValue[index] || ''}
+                    onChange={(e) => handleOtpChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                    className="w-12 h-14 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none transition-all"
+                    disabled={otpModal.isVerifying || otpModal.countdown <= 0}
+                  />
+                ))}
+              </div>
+
+              {/* Bank Info Preview */}
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                <p className="text-xs text-gray-500 font-medium uppercase">Thông tin sẽ được xác minh:</p>
+                <div className="text-sm space-y-1">
+                  <p><span className="text-gray-500">Ngân hàng:</span> <span className="font-medium">{vietnamBanks.find(b => b.value === userData.bankName)?.label.split(' - ')[0] || userData.bankName}</span></p>
+                  <p><span className="text-gray-500">Số TK:</span> <span className="font-medium font-mono">{userData.accountNumber}</span></p>
+                  <p><span className="text-gray-500">Chủ TK:</span> <span className="font-medium">{userData.accountHolder}</span></p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={handleCloseOtpModal}
+                  disabled={otpModal.isVerifying}
+                  className="flex-1"
+                >
+                  Hủy bỏ
+                </Button>
+                <Button
+                  onClick={handleVerifyOtp}
+                  disabled={otpModal.otpValue.length !== 6 || otpModal.isVerifying || otpModal.countdown <= 0}
+                  className="flex-1"
+                >
+                  {otpModal.isVerifying ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Đang xác minh...
+                    </>
+                  ) : (
+                    'Xác nhận'
+                  )}
+                </Button>
+              </div>
+
+              {/* Warning */}
+              <p className="text-xs text-center text-amber-600 bg-amber-50 p-2 rounded">
+                Sau khi xác minh, thông tin ngân hàng sẽ bị khóa vĩnh viễn
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

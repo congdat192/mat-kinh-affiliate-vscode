@@ -70,6 +70,11 @@ VITE_SUPABASE_URL=your_supabase_url
 | created_at | TIMESTAMPTZ | Created date |
 | approved_at | TIMESTAMPTZ | Approved date |
 | approved_by | UUID | Approving admin |
+| bank_name | VARCHAR(255) | Bank name |
+| bank_account_number | VARCHAR(50) | Bank account number |
+| bank_account_name | VARCHAR(255) | Bank account holder name |
+| bank_verified | BOOLEAN | Bank verification status |
+| bank_verified_at | TIMESTAMPTZ | Bank verification timestamp |
 
 #### Table: `otp_verifications`
 | Column | Type | Description |
@@ -152,6 +157,8 @@ Views exposing `affiliate` tables for API access:
 | `send-affiliate-registration-email` | v1 | Send registration confirmation email (pending approval) |
 | `send-affiliate-approval-email` | v1 | Send account activation email (after admin approval) |
 | `create-and-release-voucher-affiliate-internal` | v6 | Issue voucher for F1 customer via KiotViet API, saves to voucher_affiliate_tracking, updates JSONB conversion_count |
+| `send-otp-bank-verification` | v1 | Send OTP for bank info verification (F0 ProfilePage) |
+| `verify-otp-bank` | v1 | Verify OTP, save bank info, send confirmation email |
 
 ### Vihat API Configuration
 
@@ -192,6 +199,23 @@ F0 selects campaign → Generate link (client-side) → Save to DB for history
 | true | true | Normal usage |
 | true | false | Pending approval |
 | false | * | Account locked |
+
+### Bank Verification Flow
+
+```
+F0 Profile → Tab "Ngân hàng" → Fill bank info → Click "Xác minh qua OTP"
+                                                         ↓
+                                              OTP sent to F0's phone
+                                                         ↓
+                                              Enter OTP → Verify
+                                                         ↓
+                        Bank info saved + Locked form + Confirmation email
+```
+
+**Key Features:**
+- OTP only for first-time verification (saves SMS costs)
+- After verification: Form readonly, shows "Đã xác minh" badge
+- Future changes require Admin intervention
 
 ## UI Components
 
@@ -315,6 +339,10 @@ src/
 - [x] Refactored `referral_links` to JSONB structure (1 row per F0)
 - [x] Toast notification system
 - [x] ClaimVoucherPage success UI (copy/save voucher)
+- [x] Bank verification OTP flow (ProfilePage)
+- [x] Edge Function `send-otp-bank-verification` v1
+- [x] Edge Function `verify-otp-bank` v1
+- [x] Database columns `bank_verified`, `bank_verified_at`
 - [ ] Row Level Security (RLS)
 
 ### Phase 5: Deployment

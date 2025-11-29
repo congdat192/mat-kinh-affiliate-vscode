@@ -68,6 +68,11 @@ Stores F0 partner information.
 | approved_at | TIMESTAMPTZ | Approval date |
 | approved_by | UUID | Admin who approved |
 | admin_note | TEXT | Admin notes |
+| bank_name | VARCHAR(255) | Bank name |
+| bank_account_number | VARCHAR(50) | Bank account number |
+| bank_account_name | VARCHAR(255) | Bank account holder name |
+| bank_verified | BOOLEAN | Bank info verification status (default: false) |
+| bank_verified_at | TIMESTAMPTZ | Bank verification timestamp |
 
 **Triggers:**
 - `trigger_generate_f0_code`: Auto-generate f0_code on insert
@@ -552,6 +557,87 @@ Authenticates F0 partner with specific error codes.
 4. Check account status (is_active)
 5. Return user data with approval_status
 
+### `send-otp-bank-verification` (v1)
+Sends OTP via Vihat SMS for bank information verification in ProfilePage.
+
+**Request:**
+```json
+{
+  "f0_id": "uuid",
+  "bank_name": "Vietcombank",
+  "bank_account_number": "1234567890",
+  "bank_account_name": "NGUYEN VAN A"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "record_id": "uuid",
+  "phone_masked": "091***5678",
+  "expires_in": 300
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `MISSING_F0_ID` | F0 ID empty | Thiếu thông tin người dùng |
+| `MISSING_BANK_INFO` | Bank info incomplete | Vui lòng điền đầy đủ thông tin ngân hàng |
+| `F0_NOT_FOUND` | F0 partner not found | Không tìm thấy thông tin đối tác |
+| `ALREADY_VERIFIED` | Bank already verified | Thông tin ngân hàng đã được xác minh |
+
+**Flow:**
+1. Validate F0 exists and bank not already verified
+2. Get Vihat credentials via RPC `get_vihat_credential()`
+3. Generate 6-digit OTP
+4. Save to `api.otp_verifications` with bank data in `registration_data` JSONB
+5. Send OTP via Vihat MultiChannelMessage API (Zalo + SMS fallback)
+
+### `verify-otp-bank` (v1)
+Verifies OTP and saves bank information, sends confirmation email.
+
+**Request:**
+```json
+{
+  "record_id": "uuid",
+  "phone": "0912345678",
+  "otp": "123456"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Xác minh thông tin ngân hàng thành công!",
+  "bank_info": {
+    "bank_name": "Vietcombank",
+    "bank_account_number": "1234567890",
+    "bank_account_name": "NGUYEN VAN A",
+    "bank_verified": true,
+    "bank_verified_at": "2025-01-29T10:00:00Z"
+  }
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `MISSING_FIELDS` | Required fields empty | Thiếu thông tin bắt buộc |
+| `OTP_NOT_FOUND` | OTP record not found | Không tìm thấy mã OTP |
+| `OTP_USED` | OTP already used | Mã OTP đã được sử dụng |
+| `OTP_EXPIRED` | OTP expired | Mã OTP đã hết hạn |
+| `INVALID_OTP` | Wrong OTP code | Mã OTP không chính xác |
+
+**Flow:**
+1. Find OTP record by record_id and phone
+2. Validate OTP (not used, not expired, correct code)
+3. Update `f0_partners` with bank info + `bank_verified = true`
+4. Mark OTP as used
+5. Send confirmation email via Resend (non-blocking)
+
 ### `create-and-release-voucher-affiliate-internal` (v6)
 Creates and releases voucher for F1 customer via KiotViet API. Saves to `affiliate.voucher_affiliate_tracking` for F0 revenue tracking.
 
@@ -668,6 +754,47 @@ Creates and releases voucher for F1 customer via KiotViet API. Saves to `affilia
 | true | true | Normal login & usage |
 | true | false | Login -> Show "Pending approval" message |
 | false | * | Login -> "Account locked" error |
+
+### F0 Bank Information Verification (OTP)
+
+```
+1. F0 goes to Profile page -> Tab "Ngân hàng"
+   |
+2. F0 fills bank info (bank name, account number, account name)
+   |
+3. Click "Xác minh qua OTP" button
+   |
+4. Call send-otp-bank-verification Edge Function
+   |
+5. Vihat sends OTP via SMS to F0's registered phone
+   |
+6. OTP Modal opens with 6 input boxes
+   |
+7. F0 enters OTP -> Call verify-otp-bank Edge Function
+   |
+8. If OTP valid:
+   |   - Update f0_partners with bank info
+   |   - Set bank_verified = true, bank_verified_at = now
+   |   - Send confirmation email via Resend
+   |   - Lock form permanently (readonly)
+   |
+9. F0 sees locked form with verified bank info
+   |
+10. Future changes require Admin intervention
+```
+
+**Key Features:**
+- OTP sent only for first-time verification (to save SMS costs)
+- After verification: Form becomes readonly, shows "Đã xác minh" badge
+- 5-minute countdown timer for OTP expiry
+- Bank info preview shown in OTP modal before verification
+- Confirmation email sent after successful verification
+
+**UI States:**
+| bank_verified | Form State | Actions Available |
+|---------------|------------|-------------------|
+| false | Editable | Edit fields, "Xác minh qua OTP" button |
+| true | Readonly | View only, shows verification timestamp |
 
 ## Referral Link System
 
@@ -857,6 +984,11 @@ src/
 - [x] View `api.voucher_affiliate_tracking` with INSTEAD OF triggers
 - [x] View `api.all_voucher_tracking` (unified view: regular + affiliate vouchers)
 - [x] GRANT SELECT on `api.customers_backup` to anon role
+- [x] Bank verification OTP flow (ProfilePage)
+- [x] Edge Function `send-otp-bank-verification` v1 (send OTP for bank verification)
+- [x] Edge Function `verify-otp-bank` v1 (verify OTP, save bank info, send email)
+- [x] Database columns `bank_verified`, `bank_verified_at` in `f0_partners`
+- [x] ProfilePage bank tab with OTP modal and form locking
 
 ### In Progress
 - [ ] Protected routes implementation
