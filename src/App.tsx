@@ -25,23 +25,6 @@ import F0WithdrawalPage from '@/pages/f0/WithdrawalPage';
 import ProfilePage from '@/pages/f0/ProfilePage';
 import NotificationsPage from '@/pages/f0/NotificationsPage';
 
-// Admin Layout
-import AdminLayout from '@/components/layout/AdminLayout';
-
-// Admin Pages
-import AdminDashboardPage from '@/pages/admin/DashboardPage';
-import PartnersPage from '@/pages/admin/PartnersPage';
-import CustomersPage from '@/pages/admin/CustomersPage';
-import OrdersPage from '@/pages/admin/OrdersPage';
-import CommissionsPage from '@/pages/admin/CommissionsPage';
-import AdminWithdrawalsPage from '@/pages/admin/WithdrawalsPage';
-import VouchersPage from '@/pages/admin/VouchersPage';
-import CampaignsPage from '@/pages/admin/CampaignsPage';
-import F0AssignmentsPage from '@/pages/admin/F0AssignmentsPage';
-import ReportsPage from '@/pages/admin/ReportsPage';
-import SettingsPage from '@/pages/admin/SettingsPage';
-import AdminsPage from '@/pages/admin/AdminsPage';
-
 function App() {
   return (
     <ToastProvider>
@@ -68,22 +51,6 @@ function App() {
           <Route path="withdrawal" element={<F0WithdrawalPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="notifications" element={<NotificationsPage />} />
-        </Route>
-
-        {/* Admin Pages (With Layout) */}
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route path="dashboard" element={<AdminDashboardPage />} />
-          <Route path="partners" element={<PartnersPage />} />
-          <Route path="customers" element={<CustomersPage />} />
-          <Route path="orders" element={<OrdersPage />} />
-          <Route path="commissions" element={<CommissionsPage />} />
-          <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
-          <Route path="vouchers" element={<VouchersPage />} />
-          <Route path="campaigns" element={<CampaignsPage />} />
-          <Route path="f0-assignments" element={<F0AssignmentsPage />} />
-          <Route path="reports" element={<ReportsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="admins" element={<AdminsPage />} />
         </Route>
         </Routes>
       </BrowserRouter>

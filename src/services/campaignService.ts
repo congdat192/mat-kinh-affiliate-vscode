@@ -7,20 +7,23 @@ import type {
   AssignCampaignRequest,
   IssueVoucherRequest,
 } from '@/types/campaign';
-import {
-  mockCampaigns,
-  mockF0Assignments,
-  mockVouchersIssued,
-  getCampaignsByF0,
-  generateVoucherCode,
-} from '@/data/mockCampaigns';
 import { externalApiService } from './externalApiService';
 
+// Helper function to generate voucher code
+function generateVoucherCode(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = 'VOUCHER-';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 class CampaignService {
-  // In-memory storage for mock data (will be replaced with API calls later)
-  private campaigns: Campaign[] = [...mockCampaigns];
-  private assignments: F0CampaignAssignment[] = [...mockF0Assignments];
-  private vouchers: VoucherIssued[] = [...mockVouchersIssued];
+  // In-memory storage (will be replaced with API calls later)
+  private campaigns: Campaign[] = [];
+  private assignments: F0CampaignAssignment[] = [];
+  private vouchers: VoucherIssued[] = [];
 
   /**
    * Map external API campaign to internal Campaign interface

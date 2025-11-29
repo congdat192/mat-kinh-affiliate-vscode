@@ -4,10 +4,11 @@ Affiliate partner management system for Mat Kinh Tam Duc eyewear company.
 
 ## Overview
 
-The system consists of 3 main modules:
+The system consists of 2 main modules:
 - **Landing Pages**: Program introduction and partner recruitment
 - **F0 System**: Dashboard and management for partners
-- **Admin System**: Full system administration
+
+**Note:** Admin System has been moved to a separate project (shares same Supabase backend).
 
 ## Tech Stack
 
@@ -211,13 +212,12 @@ F0 selects campaign → Generate link (client-side) → Save to DB for history
 src/
 ├── components/
 │   ├── ui/              # shadcn/ui components + Toast
-│   ├── layout/          # Layout components
+│   ├── layout/          # Layout components (F0Layout, LandingLayout)
 │   └── features/        # Feature components
 ├── pages/
 │   ├── landing/         # Landing pages
-│   ├── f0/              # F0 system pages
-│   │   └── auth/        # Auth pages
-│   └── admin/           # Admin pages
+│   └── f0/              # F0 system pages
+│       └── auth/        # Auth pages
 ├── services/            # API services
 ├── lib/
 │   ├── supabase.ts      # Supabase client (uses 'api' schema)
@@ -256,19 +256,6 @@ src/
 | `/f0/profile` | Profile |
 | `/f0/notifications` | Notifications |
 
-### Admin System
-| Route | Page |
-|-------|------|
-| `/admin/dashboard` | Dashboard |
-| `/admin/partners` | Partner management |
-| `/admin/customers` | Customer management |
-| `/admin/orders` | Orders |
-| `/admin/commissions` | Commissions |
-| `/admin/withdrawals` | Withdrawal processing |
-| `/admin/vouchers` | Vouchers |
-| `/admin/campaigns` | Campaigns |
-| `/admin/settings` | Settings |
-
 ## Commission System
 
 | Tier | Customers/Quarter | First Order | Lifetime |
@@ -293,10 +280,9 @@ src/
 - [x] F0 Registration flow fully working (OTP sent, verified, account created)
 - [x] Integrate Resend email (registration + approval emails)
 
-### Phase 3: Admin System (In Progress)
-- [x] Admin UI pages
-- [ ] Partner approval workflow
-- [ ] Commission management
+### Phase 3: Admin System (Moved to Separate Project)
+- Admin FE has been moved to a separate project
+- Shares the same Supabase backend
 
 ### Phase 4: Backend Integration ✅
 - [x] Supabase project setup
@@ -354,4 +340,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 4 Complete (F0 + F1 Flow Working) | Phase 3 Admin In Progress
+**Status**: Phase 4 Complete (F0 + F1 Flow Working) | Admin moved to separate project

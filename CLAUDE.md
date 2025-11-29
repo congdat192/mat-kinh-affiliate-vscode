@@ -760,29 +760,29 @@ function App() {
 src/
 ├── components/
 │   ├── ui/              # shadcn/ui components + Toast
-│   ├── layout/          # Layout components (F0Layout, AdminLayout, LandingLayout)
+│   ├── layout/          # Layout components (F0Layout, LandingLayout)
 │   └── features/        # Feature-specific components
 ├── pages/
 │   ├── landing/         # Landing pages (HomePage, AffiliateProgramPage, ClaimVoucherPage)
-│   ├── f0/              # F0 system pages
-│   │   ├── auth/        # Auth pages (Login, Signup, OTP, ForgotPassword)
-│   │   └── ...          # Dashboard, Profile, etc.
-│   └── admin/           # Admin system pages
+│   └── f0/              # F0 system pages
+│       ├── auth/        # Auth pages (Login, Signup, OTP, ForgotPassword)
+│       └── ...          # Dashboard, Profile, etc.
 ├── services/            # API services
 │   ├── authService.ts   # Authentication service (F0 user from storage)
 │   ├── affiliateCampaignService.ts  # Campaign & referral link operations (Supabase)
-│   ├── campaignService.ts  # Legacy mock campaign service
+│   ├── campaignService.ts  # Campaign service (empty arrays, API integration ready)
 │   ├── customerService.ts  # Customer check service
 │   ├── externalApiService.ts  # KiotViet external API
 │   └── tokenService.ts
 ├── lib/
 │   ├── supabase.ts      # Supabase client (uses 'api' schema)
 │   ├── constants.ts     # App constants
-│   ├── utils.ts         # Utility functions
-│   └── mock/            # Mock data
+│   └── utils.ts         # Utility functions
 ├── types/               # TypeScript types
 └── hooks/               # Custom React hooks
 ```
+
+**Note:** Admin FE has been removed from this project. Admin is deployed separately at a different location but shares the same Supabase backend.
 
 ## Routes
 
@@ -807,20 +807,6 @@ src/
 - `/f0/profile` - Profile
 - `/f0/notifications` - Notifications
 
-### Admin System (With AdminLayout)
-- `/admin/dashboard` - Admin dashboard
-- `/admin/partners` - Partner management
-- `/admin/customers` - Customer management
-- `/admin/orders` - Order management
-- `/admin/commissions` - Commission management
-- `/admin/withdrawals` - Withdrawal processing
-- `/admin/vouchers` - Voucher management
-- `/admin/campaigns` - Campaign management
-- `/admin/f0-assignments` - F0 assignments
-- `/admin/reports` - Reports
-- `/admin/settings` - Settings
-- `/admin/admins` - Admin management
-
 ## Commission System
 
 | Tier | Customers/Quarter | First Order | Lifetime |
@@ -835,7 +821,6 @@ src/
 - [x] Landing pages (Homepage, Affiliate Program, Voucher)
 - [x] F0 Auth UI pages (Login, Signup, OTP, Forgot Password)
 - [x] F0 System UI pages (Dashboard, Profile, etc.)
-- [x] Admin System UI pages
 - [x] Supabase project setup
 - [x] Database schema `affiliate` created
 - [x] Table `affiliate.f0_partners` created with triggers
@@ -875,12 +860,14 @@ src/
 
 ### In Progress
 - [ ] Protected routes implementation
-- [ ] Admin approval workflow (call send-affiliate-approval-email when approving)
 
 ### Pending
 - [ ] Row Level Security (RLS) policies
 - [ ] Real-time notifications
 - [ ] Test email flow end-to-end
+
+### Removed (Deployed Separately)
+- Admin FE has been moved to a separate project (shares same Supabase backend)
 
 ## Commands
 
