@@ -35,22 +35,30 @@ interface F0User {
   is_active: boolean;
   is_approved: boolean;
   created_at: string;
+  avatar_url?: string;
+  date_of_birth?: string;
+  gender?: string;
+  address?: string;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_holder?: string;
+  bank_branch?: string;
 }
 
 // Default empty user data structure
 const getDefaultUserData = (f0User: F0User | null) => ({
-  avatar: '',
+  avatar: f0User?.avatar_url || '',
   fullName: f0User?.full_name || '',
   email: f0User?.email || '',
   phone: f0User?.phone || '',
   f0Code: f0User?.f0_code || '',
-  dateOfBirth: '',
-  gender: '',
-  address: '',
-  bankName: '',
-  accountNumber: '',
-  accountHolder: '',
-  branch: '',
+  dateOfBirth: f0User?.date_of_birth || '',
+  gender: f0User?.gender || '',
+  address: f0User?.address || '',
+  bankName: f0User?.bank_name || '',
+  accountNumber: f0User?.bank_account_number || '',
+  accountHolder: f0User?.bank_account_holder || '',
+  branch: f0User?.bank_branch || '',
   currentTier: 'silver', // Default tier
   twoFactorEnabled: false,
 });
@@ -77,22 +85,53 @@ const ProfilePage = () => {
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load user data from storage on mount
+  // Load user data from storage and fetch latest from database
   useEffect(() => {
-    const storedUser = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
-    if (storedUser) {
+    const loadUserData = async () => {
+      const storedUser = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
+      if (!storedUser) {
+        navigate('/f0/auth/login');
+        return;
+      }
+
       try {
         const parsedUser = JSON.parse(storedUser) as F0User;
         setF0User(parsedUser);
-        setUserData(getDefaultUserData(parsedUser));
+
+        // Fetch latest profile data from database
+        const { data: profileData, error } = await supabase
+          .from('f0_partners')
+          .select('avatar_url, date_of_birth, gender, address, bank_name, bank_account_number, bank_account_holder, bank_branch')
+          .eq('id', parsedUser.id)
+          .single();
+
+        if (error) {
+          console.error('Error fetching profile:', error);
+          // Still use parsed user data if fetch fails
+          setUserData(getDefaultUserData(parsedUser));
+        } else {
+          // Merge database data with stored user
+          const mergedUser = { ...parsedUser, ...profileData };
+          setF0User(mergedUser);
+          setUserData(getDefaultUserData(mergedUser));
+
+          // Update storage with latest data
+          const storageKey = localStorage.getItem('f0_user') ? 'localStorage' : 'sessionStorage';
+          if (storageKey === 'localStorage') {
+            localStorage.setItem('f0_user', JSON.stringify(mergedUser));
+          } else {
+            sessionStorage.setItem('f0_user', JSON.stringify(mergedUser));
+          }
+        }
       } catch (e) {
         console.error('Error parsing user data:', e);
         navigate('/f0/auth/login');
+      } finally {
+        setIsLoading(false);
       }
-    } else {
-      navigate('/f0/auth/login');
-    }
-    setIsLoading(false);
+    };
+
+    loadUserData();
   }, [navigate]);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -160,11 +199,31 @@ const ProfilePage = () => {
         .from('avatar_affiliate')
         .getPublicUrl(filePath);
 
+      // Save avatar_url to database
+      const { error: updateError } = await supabase
+        .from('f0_partners')
+        .update({ avatar_url: publicUrl })
+        .eq('id', f0User.id);
+
+      if (updateError) {
+        console.error('Error saving avatar URL:', updateError);
+        toast.error('Lỗi khi lưu ảnh đại diện. Vui lòng thử lại.');
+        return;
+      }
+
       // Update local state
       setUserData({ ...userData, avatar: publicUrl });
-      toast.success('Tải ảnh đại diện thành công!');
 
-      // TODO: Save avatar_url to database when migration is done
+      // Update storage
+      const updatedUser = { ...f0User, avatar_url: publicUrl };
+      setF0User(updatedUser);
+      if (localStorage.getItem('f0_user')) {
+        localStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      } else {
+        sessionStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      }
+
+      toast.success('Tải ảnh đại diện thành công!');
 
     } catch (error) {
       console.error('Avatar upload error:', error);
@@ -193,10 +252,31 @@ const ProfilePage = () => {
         }
       }
 
-      setUserData({ ...userData, avatar: '' });
-      toast.success('Đã xóa ảnh đại diện');
+      // Update database to remove avatar_url
+      const { error: updateError } = await supabase
+        .from('f0_partners')
+        .update({ avatar_url: null })
+        .eq('id', f0User.id);
 
-      // TODO: Update avatar_url = null in database when migration is done
+      if (updateError) {
+        console.error('Error removing avatar URL:', updateError);
+        toast.error('Lỗi khi xóa ảnh đại diện. Vui lòng thử lại.');
+        return;
+      }
+
+      // Update local state
+      setUserData({ ...userData, avatar: '' });
+
+      // Update storage
+      const updatedUser = { ...f0User, avatar_url: undefined };
+      setF0User(updatedUser);
+      if (localStorage.getItem('f0_user')) {
+        localStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      } else {
+        sessionStorage.setItem('f0_user', JSON.stringify(updatedUser));
+      }
+
+      toast.success('Đã xóa ảnh đại diện');
 
     } catch (error) {
       console.error('Remove avatar error:', error);
