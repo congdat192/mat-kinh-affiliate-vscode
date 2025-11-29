@@ -9,15 +9,17 @@ import {
   XCircle,
   Loader2,
   Search,
-  CheckCircle,
-  ArrowRight,
+  Copy,
+  Download,
+  Home,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { customerService, type CheckCustomerResult } from '@/services/customerService';
+import { toast } from '@/components/ui/toast';
+import { validateCustomerForAffiliate, issueVoucherForF1, type AffiliateCustomerValidationResult } from '@/services/customerService';
 import { affiliateCampaignService, type AffiliateCampaign } from '@/services/affiliateCampaignService';
 import { BRAND_NAME } from '@/lib/constants';
 
@@ -36,10 +38,12 @@ const ClaimVoucherPage = () => {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [isCheckingCustomer, setIsCheckingCustomer] = useState(false);
-  const [customerCheckResult, setCustomerCheckResult] = useState<CheckCustomerResult | null>(null);
+  const [customerCheckResult, setCustomerCheckResult] = useState<AffiliateCustomerValidationResult | null>(null);
   const [isClaimingVoucher, setIsClaimingVoucher] = useState(false);
   const [voucherCode, setVoucherCode] = useState('');
+  const [voucherExpiry, setVoucherExpiry] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
+  const [claimError, setClaimError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Load campaign on mount
@@ -77,9 +81,10 @@ const ClaimVoucherPage = () => {
     return emailRegex.test(email);
   };
 
-  // Check customer type
+  // Check customer type using direct Supabase query (no OAuth needed)
   const handleCheckCustomer = async () => {
     setCustomerCheckResult(null);
+    setClaimError('');
     setErrors({});
 
     if (!phoneNumber.trim()) {
@@ -94,23 +99,26 @@ const ClaimVoucherPage = () => {
 
     setIsCheckingCustomer(true);
     try {
-      const result = await customerService.checkCustomerType(phoneNumber);
+      const result = await validateCustomerForAffiliate(phoneNumber);
       setCustomerCheckResult(result);
     } catch (error) {
       setCustomerCheckResult({
-        isValid: false,
-        customerType: null,
-        message: 'Lỗi khi kiểm tra khách hàng. Vui lòng thử lại.',
-        phone: phoneNumber,
+        success: false,
+        error: 'Lỗi khi kiểm tra khách hàng. Vui lòng thử lại.',
+        error_code: 'SYSTEM_ERROR',
       });
     } finally {
       setIsCheckingCustomer(false);
     }
   };
 
-  // Claim voucher
+  // Check if customer is eligible (new customer)
+  const isEligible = customerCheckResult?.success && customerCheckResult?.customer_type === 'new';
+
+  // Claim voucher via Edge Function claim-voucher-affiliate
   const handleClaimVoucher = async () => {
     const newErrors: Record<string, string> = {};
+    setClaimError('');
 
     if (!phoneNumber.trim()) {
       newErrors.phoneNumber = 'Vui lòng nhập số điện thoại';
@@ -124,7 +132,7 @@ const ClaimVoucherPage = () => {
 
     if (!customerCheckResult) {
       newErrors.customerCheck = 'Vui lòng kiểm tra loại khách hàng trước';
-    } else if (!customerCheckResult.isValid) {
+    } else if (!isEligible) {
       newErrors.customerCheck = 'Bạn không đủ điều kiện nhận voucher';
     }
 
@@ -134,24 +142,24 @@ const ClaimVoucherPage = () => {
       setIsClaimingVoucher(true);
 
       try {
-        // TODO: Implement claim voucher via Edge Function
-        // For now, generate a mock voucher code
-        const mockVoucherCode = `VC-${Date.now().toString().slice(-8)}`;
-        setVoucherCode(mockVoucherCode);
-        setIsSuccess(true);
-
-        // Log for debugging
-        console.log('Claim voucher params:', {
-          campaign_id: campaign.id,
-          campaign_code: campaignCode,
-          f0_code: refCode,
-          f1_phone: phoneNumber,
-          f1_name: fullName,
-          f1_email: email,
+        // Call Edge Function to issue voucher
+        const result = await issueVoucherForF1({
+          campaignCode: campaignCode,
+          recipientPhone: phoneNumber,
+          f0Code: refCode,
         });
+
+        if (result.success) {
+          setVoucherCode(result.voucher_code || '');
+          setVoucherExpiry(result.expired_at || '');
+          setIsSuccess(true);
+        } else {
+          // Show error from Edge Function
+          setClaimError(result.error || 'Không thể nhận voucher. Vui lòng thử lại.');
+        }
       } catch (error) {
         console.error('Error claiming voucher:', error);
-        alert('Lỗi khi nhận voucher. Vui lòng thử lại.');
+        setClaimError('Lỗi hệ thống. Vui lòng thử lại sau.');
       } finally {
         setIsClaimingVoucher(false);
       }
@@ -233,55 +241,131 @@ const ClaimVoucherPage = () => {
 
         {/* Success State */}
         {isSuccess ? (
-          <Card className="max-w-2xl mx-auto">
+          <Card className="max-w-lg mx-auto shadow-xl">
             <CardContent className="pt-6">
-              <div className="text-center space-y-6 py-8">
+              <div className="text-center space-y-5">
+                {/* Success Icon */}
                 <div className="flex justify-center">
-                  <div className="bg-green-100 rounded-full p-4">
-                    <Check className="w-16 h-16 text-green-600" />
+                  <div className="bg-green-100 rounded-full p-3">
+                    <Check className="w-10 h-10 text-green-600" />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <h2 className="text-2xl md:text-3xl font-bold text-gray-900">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
                     Nhận voucher thành công!
                   </h2>
-                  <p className="text-gray-600">
+                  <p className="text-sm text-gray-500 mt-1">
                     Voucher đã được gửi đến số điện thoại của bạn
                   </p>
                 </div>
 
-                <div className="bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl p-8 max-w-md mx-auto text-white shadow-lg">
-                  <div className="space-y-4">
-                    <Gift className="w-16 h-16 mx-auto opacity-90" />
+                {/* Voucher Card */}
+                <div
+                  id="voucher-card"
+                  className="bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl p-6 text-white shadow-lg"
+                >
+                  <div className="space-y-3">
+                    <Gift className="w-10 h-10 mx-auto opacity-90" />
                     <div>
-                      <p className="text-sm opacity-90 mb-1">Mã voucher của bạn</p>
-                      <p className="text-3xl font-bold tracking-wider">{voucherCode}</p>
+                      <p className="text-xs opacity-80">Mã voucher</p>
+                      <p className="text-2xl font-bold tracking-widest mt-1">{voucherCode}</p>
                     </div>
-                    <div className="border-t border-primary-400 pt-4">
-                      <p className="text-lg font-bold mb-1">{campaign.name}</p>
-                      <p className="text-sm opacity-90">Chiến dịch ưu đãi</p>
+                    <div className="border-t border-white/30 pt-3 text-sm">
+                      <p className="font-semibold">{campaign.affiliate_name || campaign.name}</p>
+                      {voucherExpiry && (
+                        <p className="text-xs opacity-80 mt-1">
+                          HSD: {new Date(voucherExpiry).toLocaleDateString('vi-VN')}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <Alert>
-                  <CheckCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Voucher đã được gửi thành công!
-                    Hãy sử dụng ngay để được giảm giá cho đơn hàng của bạn!
-                  </AlertDescription>
-                </Alert>
-
-                <div className="flex gap-3 justify-center pt-4">
-                  <Button onClick={() => navigate('/')} variant="outline">
-                    Về trang chủ
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(voucherCode);
+                      toast.success('Đã sao chép mã voucher!');
+                    }}
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <Copy className="w-4 h-4" />
+                    Sao chép mã
                   </Button>
-                  <Button onClick={() => navigate('/voucher')}>
-                    Xem chi tiết voucher
-                    <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Save voucher info as image using canvas
+                      const canvas = document.createElement('canvas');
+                      canvas.width = 400;
+                      canvas.height = 250;
+                      const ctx = canvas.getContext('2d');
+                      if (ctx) {
+                        // Background gradient
+                        const gradient = ctx.createLinearGradient(0, 0, 400, 250);
+                        gradient.addColorStop(0, '#16a34a');
+                        gradient.addColorStop(1, '#15803d');
+                        ctx.fillStyle = gradient;
+                        ctx.fillRect(0, 0, 400, 250);
+
+                        // Text
+                        ctx.fillStyle = 'white';
+                        ctx.textAlign = 'center';
+
+                        ctx.font = 'bold 14px Arial';
+                        ctx.fillText('MÃ VOUCHER', 200, 50);
+
+                        ctx.font = 'bold 32px Arial';
+                        ctx.fillText(voucherCode, 200, 100);
+
+                        ctx.font = '16px Arial';
+                        ctx.fillText(campaign.affiliate_name || campaign.name || '', 200, 150);
+
+                        if (voucherExpiry) {
+                          ctx.font = '12px Arial';
+                          ctx.fillText(`HSD: ${new Date(voucherExpiry).toLocaleDateString('vi-VN')}`, 200, 180);
+                        }
+
+                        ctx.font = '11px Arial';
+                        ctx.fillText(BRAND_NAME, 200, 220);
+
+                        // Download
+                        const link = document.createElement('a');
+                        link.download = `voucher-${voucherCode}.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                        toast.success('Đã lưu ảnh voucher!');
+                      }
+                    }}
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    Lưu ảnh
                   </Button>
                 </div>
+
+                {/* Tips */}
+                <div className="bg-green-50 rounded-lg p-3 text-left">
+                  <p className="text-xs text-green-800 font-medium mb-1">Lưu ý:</p>
+                  <ul className="text-xs text-green-700 space-y-1">
+                    <li>• Sao chép hoặc lưu ảnh mã voucher để sử dụng khi mua hàng</li>
+                    <li>• Voucher chỉ áp dụng cho đơn hàng đầu tiên</li>
+                    <li>• Liên hệ hotline nếu cần hỗ trợ</li>
+                  </ul>
+                </div>
+
+                {/* Home Button */}
+                <Button
+                  onClick={() => navigate('/')}
+                  variant="outline"
+                  className="w-full"
+                >
+                  <Home className="w-4 h-4 mr-2" />
+                  Về trang chủ
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -301,12 +385,12 @@ const ClaimVoucherPage = () => {
                     <Gift className="w-12 h-12 mx-auto opacity-90" />
                     <div>
                       <p className="text-sm opacity-90">Chiến dịch</p>
-                      <p className="text-2xl font-bold">{campaign.name}</p>
+                      <p className="text-2xl font-bold">{campaign.affiliate_name || campaign.name}</p>
                     </div>
-                    {campaign.voucher_image_url && (
+                    {campaign.affiliate_voucher_image_url && (
                       <div className="border-t border-primary-400 pt-3">
                         <img
-                          src={campaign.voucher_image_url}
+                          src={campaign.affiliate_voucher_image_url}
                           alt="Voucher"
                           className="w-full rounded-lg"
                         />
@@ -330,9 +414,9 @@ const ClaimVoucherPage = () => {
                   </p>
                 </div>
 
-                {campaign.description && (
+                {campaign.affiliate_description && (
                   <div className="mt-4 pt-4 border-t">
-                    <p className="text-sm text-gray-600">{campaign.description}</p>
+                    <p className="text-sm text-gray-600">{campaign.affiliate_description}</p>
                   </div>
                 )}
               </CardContent>
@@ -394,18 +478,21 @@ const ClaimVoucherPage = () => {
 
                   {/* Customer Check Result */}
                   {customerCheckResult && (
-                    <Alert variant={customerCheckResult.isValid ? 'success' : 'error'}>
-                      {customerCheckResult.isValid ? (
-                        <CheckCircle className="h-4 w-4" />
-                      ) : (
-                        <XCircle className="h-4 w-4" />
-                      )}
-                      <AlertDescription className="ml-2">
-                        <p className="font-medium">{customerCheckResult.message}</p>
-                        {customerCheckResult.customerType && (
-                          <p className="text-xs mt-1">
-                            Loại khách hàng: <strong>{customerCheckResult.customerType === 'new' ? 'Khách hàng mới' : 'Khách hàng cũ'}</strong>
-                          </p>
+                    <Alert variant={isEligible ? 'success' : 'error'}>
+                      <AlertDescription>
+                        {customerCheckResult.success ? (
+                          <>
+                            <p className="font-medium">
+                              {customerCheckResult.customer_type === 'new'
+                                ? 'Khách hàng mới - Hợp lệ nhận voucher'
+                                : 'Khách hàng cũ - Không thể nhận voucher qua chương trình này'}
+                            </p>
+                            {customerCheckResult.customer_name && (
+                              <p className="text-xs mt-1 opacity-80">Họ tên: {customerCheckResult.customer_name}</p>
+                            )}
+                          </>
+                        ) : (
+                          <p className="font-medium">{customerCheckResult.error}</p>
                         )}
                       </AlertDescription>
                     </Alert>
@@ -453,11 +540,20 @@ const ClaimVoucherPage = () => {
                   )}
                 </div>
 
+                {/* Claim Error */}
+                {claimError && (
+                  <Alert variant="error">
+                    <AlertDescription>
+                      <p className="font-medium">{claimError}</p>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Claim Button */}
                 <Button
                   className="w-full"
                   onClick={handleClaimVoucher}
-                  disabled={isClaimingVoucher || !customerCheckResult?.isValid}
+                  disabled={isClaimingVoucher || !isEligible}
                 >
                   {isClaimingVoucher ? (
                     <>

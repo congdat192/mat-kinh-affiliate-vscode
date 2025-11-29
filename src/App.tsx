@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { ToastProvider } from '@/components/ui/toast';
 
 // Landing Pages
 import HomePage from '@/pages/landing/HomePage';
@@ -43,8 +44,9 @@ import AdminsPage from '@/pages/admin/AdminsPage';
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
+    <ToastProvider>
+      <BrowserRouter>
+        <Routes>
         {/* Landing Pages */}
         <Route path="/" element={<HomePage />} />
         <Route path="/affiliate-program" element={<AffiliateProgramPage />} />
@@ -83,8 +85,9 @@ function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admins" element={<AdminsPage />} />
         </Route>
-      </Routes>
-    </BrowserRouter>
+        </Routes>
+      </BrowserRouter>
+    </ToastProvider>
   );
 }
 

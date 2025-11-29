@@ -128,29 +128,67 @@ Stores password reset tokens for F0 partners.
 - Rate limit: 1 token per email per minute (enforced in Edge Function)
 - View: `api.password_resets` with INSTEAD OF triggers
 
-#### Table: `affiliate.referral_links`
-Stores referral links created by F0 partners for history tracking.
+#### Table: `affiliate.referral_links` (JSONB Structure)
+Stores referral links created by F0 partners. **Optimized**: 1 row per F0 with JSONB array for campaigns.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | UUID | Primary key |
 | f0_id | UUID | FK to f0_partners (nullable) |
-| f0_code | VARCHAR(20) | F0 partner code (e.g., F0-1234) |
-| campaign_setting_id | UUID | FK to campaign_settings |
-| campaign_code | VARCHAR(100) | Campaign code from KiotViet |
-| campaign_name | VARCHAR(255) | Campaign name |
-| full_url | TEXT | Complete referral URL |
-| click_count | INTEGER | Number of link clicks (default 0) |
-| conversion_count | INTEGER | Number of conversions (default 0) |
-| is_active | BOOLEAN | Link status (default true) |
+| f0_code | VARCHAR(20) | F0 partner code (unique) |
+| campaigns | JSONB | Array of campaign links |
 | created_at | TIMESTAMPTZ | Created date |
 | updated_at | TIMESTAMPTZ | Updated date |
-| last_clicked_at | TIMESTAMPTZ | Last click timestamp |
+
+**JSONB `campaigns` structure:**
+```json
+[
+  {
+    "campaign_setting_id": "uuid",
+    "campaign_code": "CAMPAIGN_CODE",
+    "campaign_name": "Campaign Name",
+    "click_count": 0,
+    "conversion_count": 0,
+    "is_active": true,
+    "created_at": "2025-01-01T00:00:00Z",
+    "last_clicked_at": null
+  }
+]
+```
 
 **Usage:**
 - Links are generated client-side with UTM params: `/claim-voucher?ref={f0_code}&campaign={campaign_code}`
-- Records saved to DB for F0 to view history ("Link đã tạo gần đây")
-- Get-or-create pattern: if link exists for same F0 + campaign, return existing
+- 1 row per F0, multiple campaigns stored in JSONB array
+- Get-or-create pattern: if campaign exists in array, return it; otherwise add to array
+- When all campaigns deleted, entire row is deleted (cleanup)
+
+#### Table: `affiliate.voucher_affiliate_tracking`
+Stores vouchers issued through affiliate F1 flow (separate from `vouchers.voucher_tracking`).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| code | VARCHAR(50) | Voucher code (unique) |
+| campaign_id | VARCHAR(50) | Campaign ID from KiotViet |
+| campaign_code | VARCHAR(100) | Campaign code |
+| created_at | TIMESTAMPTZ | Created date |
+| activated_at | TIMESTAMPTZ | Activation date |
+| expired_at | TIMESTAMPTZ | Expiration date |
+| activation_status | VARCHAR(50) | Status (Đã kích hoạt, Đã sử dụng, Hết hạn) |
+| f0_id | UUID | FK to f0_partners (affiliate who referred) |
+| f0_code | VARCHAR(20) | F0 partner code |
+| recipient_phone | VARCHAR(20) | F1 customer phone |
+| recipient_name | VARCHAR(255) | F1 customer name |
+| recipient_email | VARCHAR(255) | F1 customer email |
+| customer_type | VARCHAR(10) | 'new' or 'old' |
+| original_voucher_id | UUID | FK for reissue tracking |
+| reissue_reason | TEXT | Reason for reissue |
+| reissued_at | TIMESTAMPTZ | Reissue timestamp |
+| reissued_by | VARCHAR(100) | Who reissued |
+
+**Views:**
+- `api.voucher_affiliate_tracking` - View with INSTEAD OF triggers for INSERT/UPDATE/DELETE
+- `api.all_voucher_tracking` - Unified view combining `vouchers.voucher_tracking` + `affiliate.voucher_affiliate_tracking` with `source_type` column ('regular' or 'affiliate')
 
 ### Schema: `api` (IMPORTANT - Primary Access Layer)
 
@@ -180,6 +218,8 @@ await supabase.schema('supabaseapi').from('integration_credentials').select('*')
 | `api.password_resets` | `affiliate.password_resets` | Password reset tokens |
 | `api.affiliate_campaign_settings` | `affiliate.campaign_settings` | Campaign settings for F0 referral links |
 | `api.referral_links` | `affiliate.referral_links` | Referral links history for F0 |
+| `api.voucher_affiliate_tracking` | `affiliate.voucher_affiliate_tracking` | Affiliate voucher tracking (INSTEAD OF triggers) |
+| `api.all_voucher_tracking` | UNION of `vouchers.voucher_tracking` + `affiliate.voucher_affiliate_tracking` | Unified view with `source_type` column |
 | `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
 | `api.vihat_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='vihat' |
 | `api.kiotviet_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='kiotviet' |
@@ -512,6 +552,71 @@ Authenticates F0 partner with specific error codes.
 4. Check account status (is_active)
 5. Return user data with approval_status
 
+### `create-and-release-voucher-affiliate-internal` (v6)
+Creates and releases voucher for F1 customer via KiotViet API. Saves to `affiliate.voucher_affiliate_tracking` for F0 revenue tracking.
+
+**Request:**
+```json
+{
+  "campaign_code": "CAMPAIGN123",
+  "recipient_phone": "0912345678",
+  "f0_code": "F0-1234",
+  "recipient_name": "Nguyen Van B",
+  "recipient_email": "f1@email.com"
+}
+```
+
+**Success Response:**
+```json
+{
+  "success": true,
+  "message": "Phát voucher thành công!",
+  "voucher_code": "ABC1234567",
+  "campaign_name": "Chiến dịch mùa hè",
+  "expired_at": "2025-02-28T23:59:59.999+07:00",
+  "recipient_phone": "0912345678",
+  "customer_type": "new",
+  "f0_code": "F0-1234",
+  "f0_name": "Nguyen Van A",
+  "meta": {
+    "request_id": "uuid",
+    "duration_ms": 1500
+  }
+}
+```
+
+**Error Codes:**
+| Code | Description | Vietnamese Message |
+|------|-------------|-------------------|
+| `MISSING_CAMPAIGN_CODE` | Campaign code empty | Thiếu mã chiến dịch |
+| `MISSING_PHONE` | Phone empty | Thiếu số điện thoại |
+| `INVALID_PHONE` | Invalid phone format | Số điện thoại không hợp lệ |
+| `OLD_CUSTOMER` | Customer has totalrevenue > 0 | Số điện thoại này đã là khách hàng cũ |
+| `CAMPAIGN_NOT_FOUND` | Campaign not active | Chiến dịch không tồn tại hoặc đã kết thúc |
+| `DUPLICATE_VOUCHER` | Active voucher exists for same phone + campaign | Đã có voucher chưa sử dụng |
+| `KIOTVIET_CREATE_ERROR` | KiotViet API create failed | Lỗi tạo voucher trên KiotViet |
+
+**Flow:**
+1. Validate phone format (10 digits, starts with 0)
+2. Check customer type via `api.customers_backup` (new if totalrevenue <= 0)
+3. Get campaign from `api.affiliate_campaign_settings`
+4. Check for duplicate voucher in `api.voucher_affiliate_tracking`
+5. Validate F0 partner if f0_code provided
+6. Get KiotViet token (auto-refresh if expired)
+7. Generate 10-character voucher code
+8. Create voucher in KiotViet
+9. Release voucher in KiotViet
+10. Save to `api.voucher_affiliate_tracking` with f0_id, f0_code
+11. Update `referral_links` campaigns JSONB array conversion_count
+
+**Key Features:**
+- Saves to `affiliate.voucher_affiliate_tracking` (not `vouchers.voucher_tracking`)
+- Stores `f0_id` and `f0_code` for F0 revenue tracking
+- Auto token refresh with KiotViet OAuth
+- Vietnam timezone handling (UTC+7)
+- Duplicate check: blocks if active voucher exists for same phone + campaign
+- Updates conversion_count in JSONB campaigns array (v6)
+
 ## Authentication Flow
 
 ### F0 Partner Registration
@@ -612,12 +717,49 @@ F1 opens link with UTM → Validate UTM params → Check customer status
 - `deleteReferralLink(linkId, f0Code)` - Delete link (ownership check)
 - `generateReferralLink(f0Code, campaignCode)` - Generate URL string
 
+## UI Components
+
+### Toast Notification System
+Global toast notifications using custom `ToastProvider` component.
+
+**Location:** `src/components/ui/toast.tsx`
+
+**Usage:**
+```typescript
+import { toast } from '@/components/ui/toast';
+
+// Show notifications
+toast.success('Operation successful!', 'Title');
+toast.error('Something went wrong');
+toast.info('Information message');
+toast.warning('Warning message');
+```
+
+**Features:**
+- Positioned at bottom-right corner
+- Auto-dismiss after 4 seconds
+- 4 types: success, error, info, warning
+- Global event system (works anywhere in app)
+
+**Setup in App.tsx:**
+```tsx
+import { ToastProvider } from '@/components/ui/toast';
+
+function App() {
+  return (
+    <ToastProvider>
+      <BrowserRouter>...</BrowserRouter>
+    </ToastProvider>
+  );
+}
+```
+
 ## Project Structure
 
 ```
 src/
 ├── components/
-│   ├── ui/              # shadcn/ui components
+│   ├── ui/              # shadcn/ui components + Toast
 │   ├── layout/          # Layout components (F0Layout, AdminLayout, LandingLayout)
 │   └── features/        # Feature-specific components
 ├── pages/
@@ -721,11 +863,19 @@ src/
 - [x] F0 Create Referral Link page (client-side UTM generation)
 - [x] affiliateCampaignService (Supabase queries for campaigns & referral links)
 - [x] ClaimVoucherPage validates UTM params (ref + campaign required)
+- [x] F1 Voucher Claim flow (validateCustomerForAffiliate + issueVoucherForF1)
+- [x] Edge Function `create-and-release-voucher-affiliate-internal` v6 (issue voucher via KiotViet API, save to voucher_affiliate_tracking, update JSONB conversion_count)
+- [x] Table `affiliate.voucher_affiliate_tracking` for tracking affiliate vouchers
+- [x] Refactored `referral_links` table to JSONB structure (1 row per F0)
+- [x] Toast notification system (`src/components/ui/toast.tsx`)
+- [x] ClaimVoucherPage success UI with copy/save voucher features
+- [x] View `api.voucher_affiliate_tracking` with INSTEAD OF triggers
+- [x] View `api.all_voucher_tracking` (unified view: regular + affiliate vouchers)
+- [x] GRANT SELECT on `api.customers_backup` to anon role
 
 ### In Progress
 - [ ] Protected routes implementation
 - [ ] Admin approval workflow (call send-affiliate-approval-email when approving)
-- [ ] ClaimVoucherPage issue voucher via KiotViet API
 
 ### Pending
 - [ ] Row Level Security (RLS) policies

@@ -1,5 +1,6 @@
 // Customer Service - Kiểm tra khách hàng cũ/mới
 import { tokenService } from './tokenService';
+import { supabase } from '@/lib/supabase';
 
 // Use proxy for both development and production to avoid CORS issues
 const API_BASE_URL = '/api';
@@ -154,3 +155,216 @@ class CustomerService {
 
 // Export singleton instance
 export const customerService = new CustomerService();
+
+// ============================================
+// NEW: Direct Supabase validation for Affiliate F1 flow
+// (No OAuth token required - uses Supabase anon key)
+// ============================================
+
+// Customer validation result for affiliate flow
+export interface AffiliateCustomerValidationResult {
+  success: boolean;
+  customer_type?: CustomerType;
+  customer_name?: string;
+  total_revenue?: number;
+  error?: string;
+  error_code?: string;
+}
+
+/**
+ * Normalize phone number to standard format
+ * - Remove spaces, dashes, dots
+ * - Convert +84 to 0
+ * - Ensure starts with 0
+ */
+function normalizePhone(phone: string): string {
+  let cleaned = phone.replace(/[\s\-\.]/g, '');
+
+  // Convert +84 to 0
+  if (cleaned.startsWith('+84')) {
+    cleaned = '0' + cleaned.slice(3);
+  }
+  // Convert 84 to 0 (if starts with 84 and length > 10)
+  if (cleaned.startsWith('84') && cleaned.length > 10) {
+    cleaned = '0' + cleaned.slice(2);
+  }
+
+  return cleaned;
+}
+
+/**
+ * Validate if phone number is Vietnamese format
+ */
+function isValidVietnamesePhone(phone: string): boolean {
+  const cleaned = normalizePhone(phone);
+  // Vietnamese phone: 10 digits, starts with 0
+  return /^0[0-9]{9}$/.test(cleaned);
+}
+
+/**
+ * Validate customer type for Affiliate F1 flow
+ * Query api.customers_backup directly (no OAuth needed)
+ * - If not found or totalrevenue <= 0 → "new"
+ * - If totalrevenue > 0 → "old"
+ *
+ * @param phone - Customer phone number
+ * @returns AffiliateCustomerValidationResult
+ */
+export async function validateCustomerForAffiliate(phone: string): Promise<AffiliateCustomerValidationResult> {
+  try {
+    // Validate phone format
+    if (!phone || !phone.trim()) {
+      return {
+        success: false,
+        error: 'Vui lòng nhập số điện thoại',
+        error_code: 'MISSING_PHONE',
+      };
+    }
+
+    const cleanPhone = normalizePhone(phone.trim());
+
+    if (!isValidVietnamesePhone(cleanPhone)) {
+      return {
+        success: false,
+        error: 'Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)',
+        error_code: 'INVALID_PHONE',
+      };
+    }
+
+    console.log('🔍 Validating customer for affiliate:', cleanPhone);
+
+    // Query customers_backup view directly via Supabase
+    const { data, error } = await supabase
+      .from('customers_backup')
+      .select('contactnumber, name, totalrevenue')
+      .eq('contactnumber', cleanPhone)
+      .maybeSingle();
+
+    if (error) {
+      console.error('❌ Error querying customers_backup:', error);
+      return {
+        success: false,
+        error: 'Lỗi khi kiểm tra thông tin khách hàng',
+        error_code: 'QUERY_ERROR',
+      };
+    }
+
+    // Customer not found → new customer
+    if (!data) {
+      console.log('✅ Customer not found → NEW customer');
+      return {
+        success: true,
+        customer_type: 'new',
+        customer_name: undefined,
+        total_revenue: 0,
+      };
+    }
+
+    // Check totalrevenue to determine customer type
+    const totalRevenue = data.totalrevenue;
+
+    if (totalRevenue === null || totalRevenue === undefined || totalRevenue <= 0) {
+      // No revenue or zero revenue → new customer
+      console.log('✅ Customer found but no revenue → NEW customer');
+      return {
+        success: true,
+        customer_type: 'new',
+        customer_name: data.name || undefined,
+        total_revenue: totalRevenue || 0,
+      };
+    }
+
+    // Has positive revenue → old customer
+    console.log('⚠️ Customer has revenue:', totalRevenue, '→ OLD customer');
+    return {
+      success: true,
+      customer_type: 'old',
+      customer_name: data.name || undefined,
+      total_revenue: totalRevenue,
+    };
+
+  } catch (error) {
+    console.error('❌ Error in validateCustomerForAffiliate:', error);
+    return {
+      success: false,
+      error: 'Lỗi hệ thống. Vui lòng thử lại sau.',
+      error_code: 'SYSTEM_ERROR',
+    };
+  }
+}
+
+/**
+ * Issue voucher for F1 customer via Edge Function
+ * Calls create-and-release-voucher-affiliate-internal (no Supabase Auth required)
+ *
+ * @param params - Voucher issue parameters
+ */
+export async function issueVoucherForF1(params: {
+  campaignCode: string;  // campaign_code from affiliate_campaign_settings
+  recipientPhone: string;
+  f0Code?: string;
+}): Promise<{
+  success: boolean;
+  voucher_code?: string;
+  campaign_name?: string;
+  expired_at?: string;
+  message?: string;
+  error?: string;
+  error_code?: string;
+}> {
+  try {
+    const cleanPhone = normalizePhone(params.recipientPhone);
+
+    console.log('🎫 Issuing voucher for F1:', {
+      campaignCode: params.campaignCode,
+      phone: cleanPhone,
+      f0Code: params.f0Code,
+    });
+
+    const { data, error } = await supabase.functions.invoke('create-and-release-voucher-affiliate-internal', {
+      body: {
+        campaign_code: params.campaignCode,
+        recipient_phone: cleanPhone,
+        f0_code: params.f0Code,
+      },
+    });
+
+    if (error) {
+      console.error('❌ Error calling create-and-release-voucher-affiliate-internal:', error);
+      return {
+        success: false,
+        error: 'Lỗi khi phát voucher. Vui lòng thử lại.',
+        error_code: 'EDGE_FUNCTION_ERROR',
+      };
+    }
+
+    if (!data.success) {
+      console.error('❌ Voucher issue failed:', data);
+      return {
+        success: false,
+        error: data.error || 'Không thể phát voucher',
+        error_code: data.error_code || 'VOUCHER_ERROR',
+      };
+    }
+
+    console.log('✅ Voucher issued successfully:', data);
+    return {
+      success: true,
+      voucher_code: data.voucher_code,
+      campaign_name: data.campaign_name,
+      expired_at: data.expired_at,
+      message: data.message || 'Phát voucher thành công!',
+    };
+
+  } catch (error) {
+    console.error('❌ Error in issueVoucherForF1:', error);
+    return {
+      success: false,
+      error: 'Lỗi hệ thống. Vui lòng thử lại sau.',
+      error_code: 'SYSTEM_ERROR',
+    };
+  }
+}
+
+// Export utility functions
+export { normalizePhone, isValidVietnamesePhone };

@@ -102,18 +102,32 @@ VITE_SUPABASE_URL=your_supabase_url
 | expires_at | TIMESTAMPTZ | Expiration (15 min) |
 | is_used | BOOLEAN | Used status |
 
-#### Table: `referral_links`
+#### Table: `referral_links` (JSONB Structure)
 | Column | Type | Description |
 |--------|------|-------------|
 | id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| f0_code | VARCHAR(20) | F0 partner code (unique) |
+| campaigns | JSONB | Array of campaign links |
+| created_at | TIMESTAMPTZ | Created date |
+| updated_at | TIMESTAMPTZ | Updated date |
+
+**Note:** Optimized structure - 1 row per F0, campaigns stored as JSONB array with `campaign_code`, `campaign_name`, `click_count`, `conversion_count`, etc.
+
+#### Table: `voucher_affiliate_tracking`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| code | VARCHAR(50) | Voucher code (unique) |
+| campaign_id | VARCHAR(50) | Campaign ID from KiotViet |
+| campaign_code | VARCHAR(100) | Campaign code |
+| f0_id | UUID | FK to f0_partners (referrer) |
 | f0_code | VARCHAR(20) | F0 partner code |
-| campaign_setting_id | UUID | FK to campaign_settings |
-| campaign_code | VARCHAR(100) | Campaign code from KiotViet |
-| campaign_name | VARCHAR(255) | Campaign name |
-| full_url | TEXT | Complete referral URL |
-| click_count | INTEGER | Link clicks (default 0) |
-| conversion_count | INTEGER | Conversions (default 0) |
-| is_active | BOOLEAN | Link status |
+| recipient_phone | VARCHAR(20) | F1 customer phone |
+| recipient_name | VARCHAR(255) | F1 customer name |
+| customer_type | VARCHAR(10) | 'new' or 'old' |
+| activation_status | VARCHAR(50) | Status (Đã kích hoạt, Đã sử dụng) |
+| expired_at | TIMESTAMPTZ | Expiration date |
 
 ### Schema: `api`
 Views exposing `affiliate` tables for API access:
@@ -122,6 +136,8 @@ Views exposing `affiliate` tables for API access:
 - `api.password_resets` → view of `affiliate.password_resets`
 - `api.affiliate_campaign_settings` → view of `affiliate.campaign_settings`
 - `api.referral_links` → view of `affiliate.referral_links`
+- `api.voucher_affiliate_tracking` → view of `affiliate.voucher_affiliate_tracking`
+- `api.all_voucher_tracking` → unified view (regular + affiliate vouchers)
 
 ## Supabase Edge Functions
 
@@ -134,6 +150,7 @@ Views exposing `affiliate` tables for API access:
 | `reset-password-affiliate` | v1 | Reset password using token from email link |
 | `send-affiliate-registration-email` | v1 | Send registration confirmation email (pending approval) |
 | `send-affiliate-approval-email` | v1 | Send account activation email (after admin approval) |
+| `create-and-release-voucher-affiliate-internal` | v6 | Issue voucher for F1 customer via KiotViet API, saves to voucher_affiliate_tracking, updates JSONB conversion_count |
 
 ### Vihat API Configuration
 
@@ -175,12 +192,25 @@ F0 selects campaign → Generate link (client-side) → Save to DB for history
 | true | false | Pending approval |
 | false | * | Account locked |
 
+## UI Components
+
+### Toast Notification
+- Location: `src/components/ui/toast.tsx`
+- Position: Bottom-right corner, auto-dismiss after 4 seconds
+- Types: success, error, info, warning
+- Usage: `toast.success('Message', 'Title')`
+
+### Voucher Claim Success
+- Copy voucher code to clipboard
+- Download voucher as PNG image
+- Tips section for user guidance
+
 ## Folder Structure
 
 ```
 src/
 ├── components/
-│   ├── ui/              # shadcn/ui components
+│   ├── ui/              # shadcn/ui components + Toast
 │   ├── layout/          # Layout components
 │   └── features/        # Feature components
 ├── pages/
@@ -290,6 +320,15 @@ src/
 - [x] Database permissions for service_role on `api` schema views
 - [x] F0 Create Referral Link (client-side UTM generation)
 - [x] ClaimVoucherPage with UTM validation
+- [x] F1 Voucher Claim flow (customer type check + issue voucher)
+- [x] Edge Function `create-and-release-voucher-affiliate-internal` v6 (KiotViet voucher API + JSONB update)
+- [x] Table `voucher_affiliate_tracking` for affiliate voucher tracking
+- [x] View `api.voucher_affiliate_tracking` with INSTEAD OF triggers
+- [x] View `api.all_voucher_tracking` (unified view: regular + affiliate)
+- [x] GRANT SELECT on `api.customers_backup` to anon role
+- [x] Refactored `referral_links` to JSONB structure (1 row per F0)
+- [x] Toast notification system
+- [x] ClaimVoucherPage success UI (copy/save voucher)
 - [ ] Row Level Security (RLS)
 
 ### Phase 5: Deployment
@@ -315,4 +354,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 2 Complete (F0 Registration + Forgot Password Working) | Phase 3 In Progress
+**Status**: Phase 4 Complete (F0 + F1 Flow Working) | Phase 3 Admin In Progress

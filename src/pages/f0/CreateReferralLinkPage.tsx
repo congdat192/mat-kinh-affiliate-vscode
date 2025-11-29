@@ -15,6 +15,8 @@ import {
   RefreshCw,
   Download,
   Trash2,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,9 +33,26 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { toast } from '@/components/ui/toast';
 import { authService } from '@/services/authService';
-import { affiliateCampaignService, type AffiliateCampaign, type ReferralLink } from '@/services/affiliateCampaignService';
+import { affiliateCampaignService, formatExpiryInfo, type AffiliateCampaign, type ReferralLink, type ExpiryInfo } from '@/services/affiliateCampaignService';
+
+// Helper component to display expiry info
+const ExpiryInfoDisplay = ({ expiryInfo }: { expiryInfo: ExpiryInfo | null }) => {
+  if (!expiryInfo) return null;
+
+  return (
+    <div className={`text-xs flex items-center gap-1 ${expiryInfo.color}`}>
+      {expiryInfo.icon === 'clock' ? (
+        <Clock className="w-3 h-3" />
+      ) : (
+        <Calendar className="w-3 h-3" />
+      )}
+      {expiryInfo.text}
+    </div>
+  );
+};
 
 const CreateReferralLinkPage = () => {
   const [campaigns, setCampaigns] = useState<AffiliateCampaign[]>([]);
@@ -44,16 +63,21 @@ const CreateReferralLinkPage = () => {
   const [generatedLink, setGeneratedLink] = useState('');
   const [currentLinkStats, setCurrentLinkStats] = useState<{ clicks: number; conversions: number }>({ clicks: 0, conversions: 0 });
   const [copied, setCopied] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [isNewLink, setIsNewLink] = useState(false);
   const [f0Code, setF0Code] = useState('');
   const [isCreatingLink, setIsCreatingLink] = useState(false);
-  const [createError, setCreateError] = useState('');
 
   // Referral links list
   const [referralLinks, setReferralLinks] = useState<ReferralLink[]>([]);
   const [isLoadingLinks, setIsLoadingLinks] = useState(false);
   const [deletingLinkId, setDeletingLinkId] = useState<string | null>(null);
+
+  // Helper to get expiry info for a link based on its campaign
+  const getExpiryInfoForLink = (link: ReferralLink): ExpiryInfo | null => {
+    // Find the campaign for this link using KiotViet code
+    const campaign = campaigns.find(c => c.code === link.campaign_code);
+    if (!campaign) return null;
+    return formatExpiryInfo(campaign);
+  };
 
   // Load campaigns, F0 code, and existing links on mount
   useEffect(() => {
@@ -73,7 +97,7 @@ const CreateReferralLinkPage = () => {
       setCampaigns(activeCampaigns);
 
       // Auto-select default campaign if exists
-      const defaultCampaign = activeCampaigns.find(c => c.is_default);
+      const defaultCampaign = activeCampaigns.find(c => c.affiliate_is_default);
       if (defaultCampaign) {
         setSelectedCampaignId(defaultCampaign.id);
         setSelectedCampaign(defaultCampaign);
@@ -108,27 +132,23 @@ const CreateReferralLinkPage = () => {
     setSelectedCampaign(campaign || null);
     // Reset generated link when campaign changes
     setGeneratedLink('');
-    setShowSuccess(false);
-    setCreateError('');
     setCurrentLinkStats({ clicks: 0, conversions: 0 });
   };
 
   // Create referral link (client-side generation with DB history tracking)
   const handleCreateLink = async () => {
     if (!selectedCampaign || !f0Code) {
-      setCreateError('Vui lòng chọn chiến dịch');
+      toast.error('Vui lòng chọn chiến dịch');
       return;
     }
 
     setIsCreatingLink(true);
-    setCreateError('');
-    setShowSuccess(false);
 
     try {
       const result = await affiliateCampaignService.createReferralLink(f0Code, selectedCampaign);
 
       if (!result.success) {
-        setCreateError(result.error || 'Không thể tạo link');
+        toast.error(result.error || 'Không thể tạo link');
         return;
       }
 
@@ -138,14 +158,19 @@ const CreateReferralLinkPage = () => {
         clicks: result.link?.click_count ?? 0,
         conversions: result.link?.conversion_count ?? 0,
       });
-      setIsNewLink(result.is_new || false);
-      setShowSuccess(true);
+
+      // Show toast notification
+      if (result.is_new) {
+        toast.success('Hãy chia sẻ link với bạn bè để bắt đầu kiếm hoa hồng.', 'Tạo link thành công!');
+      } else {
+        toast.info('Sử dụng link bên dưới để chia sẻ.', 'Link đã tồn tại!');
+      }
 
       // Reload the links list
       loadReferralLinks(f0Code);
     } catch (error) {
       console.error('Error creating link:', error);
-      setCreateError('Lỗi hệ thống. Vui lòng thử lại sau.');
+      toast.error('Lỗi hệ thống. Vui lòng thử lại sau.');
     } finally {
       setIsCreatingLink(false);
     }
@@ -210,7 +235,7 @@ const CreateReferralLinkPage = () => {
       const pngFile = canvas.toDataURL('image/png');
 
       const downloadLink = document.createElement('a');
-      downloadLink.download = `qr-code-${f0Code}-${selectedCampaign?.campaign_code || 'link'}.png`;
+      downloadLink.download = `qr-code-${f0Code}-${selectedCampaign?.code || 'link'}.png`;
       downloadLink.href = pngFile;
       downloadLink.click();
     };
@@ -234,14 +259,14 @@ const CreateReferralLinkPage = () => {
         const deletedLink = referralLinks.find(link => link.id === linkId);
         if (deletedLink && generatedLink === deletedLink.full_url) {
           setGeneratedLink('');
-          setShowSuccess(false);
         }
+        toast.success('Đã xóa link thành công');
       } else {
-        alert(result.error || 'Không thể xóa link');
+        toast.error(result.error || 'Không thể xóa link');
       }
     } catch (error) {
       console.error('Error deleting link:', error);
-      alert('Lỗi khi xóa link');
+      toast.error('Lỗi khi xóa link');
     } finally {
       setDeletingLinkId(null);
     }
@@ -258,26 +283,6 @@ const CreateReferralLinkPage = () => {
           </p>
         </div>
 
-        {/* Success Alert */}
-        {showSuccess && (
-          <Alert variant="success">
-            <Check className="h-4 w-4" />
-            <AlertTitle>{isNewLink ? 'Tạo link thành công!' : 'Link đã tồn tại!'}</AlertTitle>
-            <AlertDescription>
-              {isNewLink
-                ? 'Link giới thiệu của bạn đã được tạo. Hãy chia sẻ nó với bạn bè để bắt đầu kiếm hoa hồng.'
-                : 'Bạn đã có link cho chiến dịch này. Sử dụng link bên dưới để chia sẻ.'}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Error Alert */}
-        {createError && (
-          <Alert variant="error">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>{createError}</AlertDescription>
-          </Alert>
-        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Create Link Form */}
@@ -338,16 +343,25 @@ const CreateReferralLinkPage = () => {
                           <option value="">-- Chọn Chiến Dịch --</option>
                           {campaigns.map((campaign) => (
                             <option key={campaign.id} value={campaign.id}>
-                              {campaign.name}
-                              {campaign.is_default && ' (Mặc định)'}
+                              {campaign.affiliate_name || campaign.name}
+                              {campaign.affiliate_is_default && ' (Mặc định)'}
                             </option>
                           ))}
                         </Select>
                       </div>
-                      {selectedCampaign?.description && (
+                      {selectedCampaign?.affiliate_description && (
                         <p className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
-                          {selectedCampaign.description}
+                          {selectedCampaign.affiliate_description}
                         </p>
+                      )}
+                      {/* Expiry Info Display */}
+                      {selectedCampaign && (
+                        <div className="bg-gray-50 p-3 rounded-lg border">
+                          <ExpiryInfoDisplay expiryInfo={formatExpiryInfo(selectedCampaign)} />
+                          {!formatExpiryInfo(selectedCampaign) && (
+                            <p className="text-xs text-gray-500">Thông tin hết hạn không xác định</p>
+                          )}
+                        </div>
                       )}
                       <p className="text-xs text-gray-500">
                         Chọn chiến dịch để tạo link giới thiệu cho khách hàng của bạn
@@ -541,6 +555,7 @@ const CreateReferralLinkPage = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Chiến dịch</TableHead>
+                      <TableHead>Hạn sử dụng</TableHead>
                       <TableHead>Link</TableHead>
                       <TableHead>Ngày tạo</TableHead>
                       <TableHead className="text-center">Lượt click</TableHead>
@@ -553,6 +568,9 @@ const CreateReferralLinkPage = () => {
                     {referralLinks.map((link) => (
                       <TableRow key={link.id}>
                         <TableCell className="font-medium">{link.campaign_name}</TableCell>
+                        <TableCell>
+                          <ExpiryInfoDisplay expiryInfo={getExpiryInfoForLink(link)} />
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <code className="text-xs bg-gray-100 px-2 py-1 rounded max-w-[150px] truncate">
