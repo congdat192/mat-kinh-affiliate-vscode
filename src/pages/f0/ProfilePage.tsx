@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
@@ -11,7 +11,12 @@ import {
   Check,
   AlertCircle,
   Smartphone,
+  Loader2,
+  Camera,
+  Trash2,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,6 +76,8 @@ const ProfilePage = () => {
   const [f0User, setF0User] = useState<F0User | null>(null);
   const [userData, setUserData] = useState(getDefaultUserData(null));
   const [isLoading, setIsLoading] = useState(true);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load user data from storage on mount
   useEffect(() => {
@@ -103,15 +110,103 @@ const ProfilePage = () => {
     confirmPassword: '',
   });
 
-  // Handle avatar upload
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle avatar upload to Supabase Storage
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setUserData({ ...userData, avatar: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+    if (!file || !f0User) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Vui lòng chọn file ảnh (JPG, PNG, GIF, WebP)');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSize) {
+      toast.error('Kích thước file tối đa là 2MB');
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+
+    try {
+      // Generate unique filename: f0_code_timestamp.extension
+      const fileExt = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `${f0User.f0_code}_${Date.now()}.${fileExt}`;
+      const filePath = `${f0User.id}/${fileName}`;
+
+      // Delete old avatar if exists
+      if (userData.avatar && userData.avatar.includes('avatar_affiliate')) {
+        const oldPath = userData.avatar.split('avatar_affiliate/')[1]?.split('?')[0];
+        if (oldPath) {
+          await supabase.storage.from('avatar_affiliate').remove([oldPath]);
+        }
+      }
+
+      // Upload new avatar
+      const { error: uploadError } = await supabase.storage
+        .from('avatar_affiliate')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        toast.error('Lỗi khi tải ảnh lên. Vui lòng thử lại.');
+        return;
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatar_affiliate')
+        .getPublicUrl(filePath);
+
+      // Update local state
+      setUserData({ ...userData, avatar: publicUrl });
+      toast.success('Tải ảnh đại diện thành công!');
+
+      // TODO: Save avatar_url to database when migration is done
+
+    } catch (error) {
+      console.error('Avatar upload error:', error);
+      toast.error('Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
+      setIsUploadingAvatar(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Handle remove avatar
+  const handleRemoveAvatar = async () => {
+    if (!userData.avatar || !f0User) return;
+
+    setIsUploadingAvatar(true);
+
+    try {
+      // Delete from storage if it's a Supabase URL
+      if (userData.avatar.includes('avatar_affiliate')) {
+        const filePath = userData.avatar.split('avatar_affiliate/')[1]?.split('?')[0];
+        if (filePath) {
+          await supabase.storage.from('avatar_affiliate').remove([filePath]);
+        }
+      }
+
+      setUserData({ ...userData, avatar: '' });
+      toast.success('Đã xóa ảnh đại diện');
+
+      // TODO: Update avatar_url = null in database when migration is done
+
+    } catch (error) {
+      console.error('Remove avatar error:', error);
+      toast.error('Có lỗi xảy ra. Vui lòng thử lại.');
+    } finally {
+      setIsUploadingAvatar(false);
     }
   };
 
@@ -323,50 +418,88 @@ const ProfilePage = () => {
                         </span>
                       </div>
                     )}
-                  </div>
-                  <div>
-                    <Label htmlFor="avatar" className="cursor-pointer">
-                      <div className="flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700">
-                        <Upload className="w-4 h-4" />
-                        Tải ảnh lên
+                    {/* Upload overlay when uploading */}
+                    {isUploadingAvatar && (
+                      <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 text-white animate-spin" />
                       </div>
-                    </Label>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="avatar" className={`cursor-pointer ${isUploadingAvatar ? 'pointer-events-none opacity-50' : ''}`}>
+                        <div className="flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 bg-primary-50 px-3 py-2 rounded-lg transition-colors">
+                          <Camera className="w-4 h-4" />
+                          {userData.avatar ? 'Đổi ảnh' : 'Tải ảnh lên'}
+                        </div>
+                      </Label>
+                      {userData.avatar && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleRemoveAvatar}
+                          disabled={isUploadingAvatar}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4 mr-1" />
+                          Xóa
+                        </Button>
+                      )}
+                    </div>
                     <Input
                       id="avatar"
+                      ref={fileInputRef}
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
                       className="hidden"
                       onChange={handleAvatarUpload}
+                      disabled={isUploadingAvatar}
                     />
-                    <p className="text-xs text-gray-500 mt-1">
-                      JPG, PNG hoặc GIF (tối đa 2MB)
+                    <p className="text-xs text-gray-500">
+                      JPG, PNG, GIF hoặc WebP (tối đa 2MB)
                     </p>
                   </div>
                 </div>
 
+                {/* Notice about locked fields */}
+                <Alert variant="info">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Họ tên, Email và Số điện thoại</strong> là thông tin đăng ký ban đầu và không thể thay đổi.
+                    Nếu cần cập nhật, vui lòng liên hệ Admin để được hỗ trợ.
+                  </AlertDescription>
+                </Alert>
+
                 {/* Full Name */}
                 <div className="space-y-2">
                   <Label htmlFor="fullName">Họ và tên</Label>
-                  <Input
-                    id="fullName"
-                    value={userData.fullName}
-                    onChange={(e) =>
-                      setUserData({ ...userData, fullName: e.target.value })
-                    }
-                    placeholder="Nhập họ và tên"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="fullName"
+                      value={userData.fullName}
+                      readOnly
+                      className="bg-gray-50 cursor-not-allowed"
+                      placeholder="Nhập họ và tên"
+                    />
+                    <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  </div>
                 </div>
 
                 {/* Email */}
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={userData.email}
-                    onChange={(e) => setUserData({ ...userData, email: e.target.value })}
-                    placeholder="email@example.com"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="email"
+                      type="email"
+                      value={userData.email}
+                      readOnly
+                      className="bg-gray-50 cursor-not-allowed"
+                      placeholder="email@example.com"
+                    />
+                    <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  </div>
                 </div>
 
                 {/* Phone Number */}
@@ -377,7 +510,7 @@ const ProfilePage = () => {
                       id="phone"
                       value={userData.phone}
                       readOnly
-                      className="bg-gray-50"
+                      className="bg-gray-50 cursor-not-allowed"
                       placeholder="Số điện thoại"
                     />
                     <Badge
@@ -387,9 +520,6 @@ const ProfilePage = () => {
                       Đã xác thực
                     </Badge>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Số điện thoại đã được xác thực và không thể thay đổi
-                  </p>
                 </div>
 
                 {/* Date of Birth */}
@@ -454,6 +584,19 @@ const ProfilePage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* Important Notice */}
+                <Alert variant="warning">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Lưu ý quan trọng</AlertTitle>
+                  <AlertDescription>
+                    <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
+                      <li>Bạn chỉ được đăng ký <strong>01 tài khoản ngân hàng duy nhất</strong> để nhận hoa hồng</li>
+                      <li>Tên chủ tài khoản <strong>phải trùng khớp</strong> với họ tên đăng ký tài khoản F0</li>
+                      <li>Sau khi thông tin được xác minh, bạn <strong>không thể tự thay đổi</strong>. Vui lòng liên hệ Admin nếu cần cập nhật</li>
+                      <li>Hoa hồng sẽ được chuyển vào tài khoản này theo chu kỳ thanh toán hàng tháng</li>
+                    </ul>
+                  </AlertDescription>
+                </Alert>
                 {/* Bank Name */}
                 <div className="space-y-2">
                   <Label htmlFor="bankName">Ngân hàng</Label>
@@ -523,6 +666,22 @@ const ProfilePage = () => {
                     hồng. Chúng tôi cam kết không chia sẻ thông tin này với bên thứ ba.
                   </AlertDescription>
                 </Alert>
+
+                {/* Verification Status Note */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="bg-gray-200 rounded-full p-2">
+                      <CreditCard className="w-4 h-4 text-gray-600" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900">Trạng thái xác minh</p>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Thông tin ngân hàng của bạn sẽ được Admin xác minh trong vòng 24-48 giờ làm việc sau khi cập nhật.
+                      </p>
+                      <Badge variant="warning" className="mt-2">Chưa xác minh</Badge>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Save Button */}
                 <Button
@@ -684,67 +843,93 @@ const ProfilePage = () => {
                   <CardTitle className="flex items-center gap-2">
                     <Smartphone className="w-5 h-5" />
                     Xác thực hai yếu tố (2FA)
+                    <Badge variant="info" className="ml-2">Đang phát triển</Badge>
                   </CardTitle>
                   <CardDescription>
                     Tăng cường bảo mật tài khoản với xác thực hai yếu tố
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <div>
-                      <p className="font-medium">
-                        {userData.twoFactorEnabled
-                          ? 'Đã bật xác thực hai yếu tố'
-                          : 'Chưa bật xác thực hai yếu tố'}
+                      <p className="font-medium text-gray-700">
+                        Chưa bật xác thực hai yếu tố
                       </p>
-                      <p className="text-sm text-gray-500">
-                        {userData.twoFactorEnabled
-                          ? 'Tài khoản của bạn được bảo vệ bởi xác thực hai yếu tố'
-                          : 'Bật tính năng này để tăng cường bảo mật'}
+                      <p className="text-sm text-gray-500 mt-1">
+                        Tính năng này đang được phát triển và sẽ sớm ra mắt. Bạn sẽ nhận được thông báo khi tính năng sẵn sàng.
                       </p>
                     </div>
                     <Button
-                      variant={userData.twoFactorEnabled ? 'outline' : 'default'}
-                      onClick={handleToggle2FA}
-                      disabled={loading}
+                      variant="outline"
+                      disabled={true}
+                      className="opacity-50 cursor-not-allowed"
                     >
-                      {userData.twoFactorEnabled ? 'Tắt' : 'Bật'}
+                      Sắp ra mắt
                     </Button>
                   </div>
+                  <Alert variant="info">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Xác thực hai yếu tố (2FA) sẽ giúp bảo vệ tài khoản của bạn bằng cách yêu cầu mã xác nhận từ ứng dụng Authenticator mỗi khi đăng nhập.
+                    </AlertDescription>
+                  </Alert>
                 </CardContent>
               </Card>
 
               {/* Session Management */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Quản lý phiên đăng nhập</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    Quản lý phiên đăng nhập
+                    <Badge variant="info" className="ml-2">Đang phát triển</Badge>
+                  </CardTitle>
                   <CardDescription>
                     Xem và quản lý các thiết bị đang đăng nhập vào tài khoản
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-start justify-between p-4 border rounded-lg">
+                  {/* Current Session */}
+                  <div className="flex items-start justify-between p-4 border rounded-lg bg-green-50 border-green-200">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="font-medium">Phiên đăng nhập hiện tại</p>
+                        <p className="font-medium text-green-800">Phiên đăng nhập hiện tại</p>
                         <Badge variant="success">Đang hoạt động</Badge>
                       </div>
-                      <p className="text-sm text-gray-600 mt-1">
+                      <p className="text-sm text-green-700 mt-1">
                         Mã F0: {f0User?.f0_code || 'N/A'}
                       </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Đăng nhập từ: {new Date().toLocaleDateString('vi-VN')}
+                      <p className="text-xs text-green-600 mt-1">
+                        Đăng nhập lúc: {new Date().toLocaleString('vi-VN', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
                       </p>
                     </div>
+                  </div>
+
+                  {/* Coming Soon Notice */}
+                  <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <p className="text-sm text-gray-600">
+                      <strong>Sắp ra mắt:</strong> Tính năng quản lý phiên đăng nhập chi tiết đang được phát triển. Bạn sẽ có thể xem:
+                    </p>
+                    <ul className="list-disc list-inside text-sm text-gray-500 mt-2 space-y-1">
+                      <li>Thông tin thiết bị (trình duyệt, hệ điều hành)</li>
+                      <li>Địa chỉ IP và vị trí đăng nhập</li>
+                      <li>Thời gian đăng nhập cụ thể</li>
+                      <li>Đăng xuất từ xa các thiết bị khác</li>
+                    </ul>
                   </div>
 
                   <Button
                     variant="outline"
                     onClick={handleLogoutAll}
-                    disabled={loading}
-                    className="w-full"
+                    disabled={true}
+                    className="w-full opacity-50 cursor-not-allowed"
                   >
-                    Đăng xuất khỏi tất cả thiết bị khác
+                    Đăng xuất khỏi tất cả thiết bị khác (Sắp ra mắt)
                   </Button>
                 </CardContent>
               </Card>
