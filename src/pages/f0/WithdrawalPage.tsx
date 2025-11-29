@@ -10,6 +10,7 @@ import {
   X,
   AlertTriangle,
 } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -226,13 +227,13 @@ const WithdrawalPage = () => {
 
   // Handle view details
   const handleViewDetails = (id: string) => {
-    alert(`Xem chi tiết yêu cầu rút tiền ${id}`);
+    toast.info(`Xem chi tiết yêu cầu rút tiền ${id} - Tính năng đang phát triển`);
   };
 
   // Handle cancel withdrawal
   const handleCancelWithdrawal = (id: string) => {
     if (confirm('Bạn có chắc chắn muốn hủy yêu cầu rút tiền này?')) {
-      alert(`Đã hủy yêu cầu rút tiền ${id}`);
+      toast.success(`Đã hủy yêu cầu rút tiền ${id}`);
     }
   };
 

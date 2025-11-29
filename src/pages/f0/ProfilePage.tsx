@@ -5,10 +5,8 @@ import {
   Lock,
   Shield,
   CreditCard,
-  Upload,
   Eye,
   EyeOff,
-  Check,
   AlertCircle,
   Smartphone,
   Loader2,
@@ -100,8 +98,6 @@ const ProfilePage = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [successMessage, setSuccessMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
 
   // Password form state
   const [passwordForm, setPasswordForm] = useState({
@@ -223,49 +219,40 @@ const ProfilePage = () => {
   // Handle personal info save
   const handleSavePersonalInfo = async () => {
     setLoading(true);
-    setSuccessMessage('');
-    setErrorMessage('');
 
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
-      setSuccessMessage('Thông tin cá nhân đã được cập nhật thành công!');
-      setTimeout(() => setSuccessMessage(''), 3000);
+      toast.success('Thông tin cá nhân đã được cập nhật thành công!');
     }, 1000);
   };
 
   // Handle bank info save
   const handleSaveBankInfo = async () => {
     setLoading(true);
-    setSuccessMessage('');
-    setErrorMessage('');
 
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
-      setSuccessMessage('Thông tin ngân hàng đã được cập nhật thành công!');
-      setTimeout(() => setSuccessMessage(''), 3000);
+      toast.success('Thông tin ngân hàng đã được cập nhật thành công!');
     }, 1000);
   };
 
   // Handle password change
   const handleChangePassword = async () => {
-    setSuccessMessage('');
-    setErrorMessage('');
-
     // Validation
     if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-      setErrorMessage('Vui lòng điền đầy đủ thông tin');
+      toast.error('Vui lòng điền đầy đủ thông tin');
       return;
     }
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-      setErrorMessage('Mật khẩu mới và xác nhận mật khẩu không khớp');
+      toast.error('Mật khẩu mới và xác nhận mật khẩu không khớp');
       return;
     }
 
     if (passwordForm.newPassword.length < 8) {
-      setErrorMessage('Mật khẩu mới phải có ít nhất 8 ký tự');
+      toast.error('Mật khẩu mới phải có ít nhất 8 ký tự');
       return;
     }
 
@@ -274,37 +261,23 @@ const ProfilePage = () => {
     // Simulate API call
     setTimeout(() => {
       setLoading(false);
-      setSuccessMessage('Mật khẩu đã được thay đổi thành công!');
+      toast.success('Mật khẩu đã được thay đổi thành công!');
       setPasswordForm({
         currentPassword: '',
         newPassword: '',
         confirmPassword: '',
       });
-      setTimeout(() => setSuccessMessage(''), 3000);
     }, 1000);
   };
 
-  // Handle 2FA toggle
+  // Handle 2FA toggle (disabled - feature in development)
   const handleToggle2FA = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setUserData({ ...userData, twoFactorEnabled: !userData.twoFactorEnabled });
-      setLoading(false);
-      setSuccessMessage(
-        `Xác thực hai yếu tố đã được ${!userData.twoFactorEnabled ? 'bật' : 'tắt'}!`
-      );
-      setTimeout(() => setSuccessMessage(''), 3000);
-    }, 1000);
+    toast.info('Tính năng này đang được phát triển');
   };
 
-  // Handle logout all sessions
+  // Handle logout all sessions (disabled - feature in development)
   const handleLogoutAll = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setSuccessMessage('Đã đăng xuất khỏi tất cả các thiết bị khác!');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    }, 1000);
+    toast.info('Tính năng này đang được phát triển');
   };
 
   // Get tier badge variant
@@ -357,23 +330,6 @@ const ProfilePage = () => {
             Mã F0: <span className="font-semibold text-primary-600">{f0User?.f0_code}</span> • Quản lý thông tin cá nhân và cài đặt bảo mật
           </p>
         </div>
-
-        {/* Success/Error Messages */}
-        {successMessage && (
-          <Alert variant="success">
-            <Check className="h-4 w-4" />
-            <AlertTitle>Thành công!</AlertTitle>
-            <AlertDescription>{successMessage}</AlertDescription>
-          </Alert>
-        )}
-
-        {errorMessage && (
-          <Alert variant="error">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Lỗi!</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        )}
 
         {/* Tabs */}
         <Tabs defaultValue="personal" className="space-y-6">

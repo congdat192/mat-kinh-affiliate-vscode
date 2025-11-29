@@ -15,6 +15,7 @@ import {
   XCircle,
   Loader2,
 } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -116,7 +117,7 @@ const ReferCustomerPage = () => {
       setCampaigns(assignedCampaigns);
     } catch (error) {
       console.error('Error loading campaigns:', error);
-      alert('Lỗi khi tải danh sách campaigns');
+      toast.error('Lỗi khi tải danh sách chiến dịch. Vui lòng thử lại.');
     } finally {
       setIsLoadingCampaigns(false);
     }
@@ -239,7 +240,7 @@ const ReferCustomerPage = () => {
         setIsSuccess(true);
       } catch (error) {
         console.error('Error issuing voucher:', error);
-        alert('Lỗi khi tạo voucher. Vui lòng thử lại.');
+        toast.error('Lỗi khi tạo voucher. Vui lòng thử lại.');
       } finally {
         setIsSending(false);
       }

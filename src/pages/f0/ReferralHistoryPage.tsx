@@ -9,6 +9,7 @@ import {
   TrendingUp,
   CheckCircle,
 } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -274,11 +275,11 @@ const ReferralHistoryPage = () => {
   };
 
   const handleExportExcel = () => {
-    alert('Xuất dữ liệu sang Excel...');
+    toast.info('Tính năng xuất Excel đang được phát triển');
   };
 
   const handleViewDetails = (id: string) => {
-    alert(`Xem chi tiết giới thiệu ${id}`);
+    toast.info(`Xem chi tiết giới thiệu ${id} - Tính năng đang phát triển`);
   };
 
   // Summary cards data
