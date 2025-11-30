@@ -36,6 +36,7 @@ interface F0User {
   is_active: boolean;
   is_approved: boolean;
   created_at: string;
+  avatar_url?: string;
 }
 
 export default function F0Layout() {
@@ -143,9 +144,17 @@ export default function F0Layout() {
               onClick={() => setUserMenuOpen(!userMenuOpen)}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors"
             >
-              <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary-500 flex items-center justify-center text-white font-semibold">
-                {user.full_name.charAt(0)}
-              </div>
+              {user.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt={user.full_name}
+                  className="flex-shrink-0 h-10 w-10 rounded-full object-cover"
+                />
+              ) : (
+                <div className="flex-shrink-0 h-10 w-10 rounded-full bg-primary-500 flex items-center justify-center text-white font-semibold">
+                  {user.full_name.charAt(0)}
+                </div>
+              )}
               <div className="flex-1 text-left">
                 <p className="text-sm font-medium text-gray-900">{user.full_name}</p>
                 <p className="text-xs text-gray-500">{user.f0_code}</p>

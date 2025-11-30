@@ -195,6 +195,72 @@ Stores vouchers issued through affiliate F1 flow (separate from `vouchers.vouche
 - `api.voucher_affiliate_tracking` - View with INSTEAD OF triggers for INSERT/UPDATE/DELETE
 - `api.all_voucher_tracking` - Unified view combining `vouchers.voucher_tracking` + `affiliate.voucher_affiliate_tracking` with `source_type` column ('regular' or 'affiliate')
 
+#### Table: `affiliate.withdrawal_requests`
+Stores F0 withdrawal requests with JSONB structure for flexible bank info and processing details.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| amount | DECIMAL(15,2) | Withdrawal amount |
+| status | VARCHAR(20) | pending/approved/rejected/completed |
+| bank_info | JSONB | Bank details (see structure below) |
+| processing_info | JSONB | Processing details (see structure below) |
+| created_at | TIMESTAMPTZ | Request date |
+| updated_at | TIMESTAMPTZ | Last update |
+
+**JSONB `bank_info` structure:**
+```json
+{
+  "bank_name": "Vietcombank",
+  "bank_account_number": "1234567890",
+  "bank_account_name": "NGUYEN VAN A",
+  "bank_branch": "Chi nhánh HCM"
+}
+```
+
+**JSONB `processing_info` structure:**
+```json
+{
+  "processed_by": "admin-uuid",
+  "processed_at": "2025-01-29T10:00:00Z",
+  "transaction_id": "TXN123456",
+  "notes": "Đã chuyển khoản",
+  "reject_reason": null
+}
+```
+
+**Views:**
+- `api.withdrawal_requests` - View with INSTEAD OF triggers for INSERT/UPDATE/DELETE
+
+#### Table: `affiliate.notifications`
+Stores F0 notifications with JSONB content for flexible notification types.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| type | VARCHAR(50) | Notification type (referral/commission/withdrawal/announcement/alert/system) |
+| content | JSONB | Notification content (see structure below) |
+| is_read | BOOLEAN | Read status (default: false) |
+| created_at | TIMESTAMPTZ | Created date |
+| read_at | TIMESTAMPTZ | When marked as read |
+
+**JSONB `content` structure (varies by type):**
+```json
+{
+  "title": "Notification title",
+  "message": "Notification message",
+  "customer_name": "Nguyen Van B",
+  "amount": 450000,
+  "voucher_code": "ABC123",
+  "link": "/f0/referral-history"
+}
+```
+
+**Views:**
+- `api.notifications` - View with INSTEAD OF triggers for INSERT/UPDATE/DELETE
+
 ### Schema: `api` (IMPORTANT - Primary Access Layer)
 
 **CRITICAL RULE:** All database access in Edge Functions MUST go through schema `api`, NOT directly to source schemas (`affiliate`, `supabaseapi`, `kiotviet`, `vouchers`, etc.).
@@ -225,6 +291,9 @@ await supabase.schema('supabaseapi').from('integration_credentials').select('*')
 | `api.referral_links` | `affiliate.referral_links` | Referral links history for F0 |
 | `api.voucher_affiliate_tracking` | `affiliate.voucher_affiliate_tracking` | Affiliate voucher tracking (INSTEAD OF triggers) |
 | `api.all_voucher_tracking` | UNION of `vouchers.voucher_tracking` + `affiliate.voucher_affiliate_tracking` | Unified view with `source_type` column |
+| `api.withdrawal_requests` | `affiliate.withdrawal_requests` | Withdrawal requests (INSTEAD OF triggers) |
+| `api.notifications` | `affiliate.notifications` | F0 notifications (INSTEAD OF triggers) |
+| `api.f0_tiers` | `affiliate.f0_tiers` | Tier configuration (dynamic requirements from DB) |
 | `api.integration_credentials` | `supabaseapi.integration_credentials` | **Excludes** `secret_key_encrypted`, `client_secret_encrypted` |
 | `api.vihat_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='vihat' |
 | `api.kiotviet_credentials` | `supabaseapi.integration_credentials` | Filtered: platform='kiotviet' |
@@ -638,6 +707,169 @@ Verifies OTP and saves bank information, sends confirmation email.
 4. Mark OTP as used
 5. Send confirmation email via Resend (non-blocking)
 
+### `get-f0-dashboard-stats` (v1)
+Gets F0 dashboard statistics including referrals, commissions, tier info, and recent activity.
+
+**Request:**
+```json
+{
+  "f0_id": "uuid"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "stats": {
+      "totalReferrals": 15,
+      "activeCustomers": 12,
+      "referralsThisQuarter": 5,
+      "totalCommission": 5000000,
+      "paidCommission": 3000000,
+      "pendingCommission": 2000000,
+      "availableBalance": 1500000
+    },
+    "tier": {
+      "current": "silver",
+      "nextTier": "gold",
+      "customersNeeded": 6,
+      "percentToNextTier": 50
+    },
+    "recentActivity": [...],
+    "unreadNotifications": 3
+  }
+}
+```
+
+### `get-f0-referral-history` (v1)
+Gets F0 referral history with pagination and filters.
+
+**Request:**
+```json
+{
+  "f0_id": "uuid",
+  "page": 1,
+  "limit": 10,
+  "status": "all",
+  "search": "",
+  "dateFrom": "2025-01-01",
+  "dateTo": "2025-12-31"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "totalRecords": 50,
+    "totalPages": 5
+  },
+  "stats": {
+    "total": 50,
+    "active": 40,
+    "pending": 5,
+    "expired": 5
+  }
+}
+```
+
+### `manage-withdrawal-request` (v1)
+Manages F0 withdrawal requests (get, create, cancel).
+
+**Request (get):**
+```json
+{
+  "action": "get",
+  "f0_id": "uuid"
+}
+```
+
+**Request (create):**
+```json
+{
+  "action": "create",
+  "f0_id": "uuid",
+  "amount": 1000000
+}
+```
+
+**Request (cancel):**
+```json
+{
+  "action": "cancel",
+  "f0_id": "uuid",
+  "request_id": "uuid"
+}
+```
+
+**Response (get):**
+```json
+{
+  "success": true,
+  "data": {
+    "requests": [...],
+    "stats": {
+      "totalWithdrawn": 5000000,
+      "pendingAmount": 1000000,
+      "availableBalance": 2000000
+    }
+  }
+}
+```
+
+### `manage-notifications` (v1)
+Manages F0 notifications (get, mark_read, mark_all_read, delete, get_unread_count).
+
+**Request (get):**
+```json
+{
+  "action": "get",
+  "f0_id": "uuid",
+  "filter": "unread",
+  "limit": 50
+}
+```
+
+**Request (mark_read):**
+```json
+{
+  "action": "mark_read",
+  "f0_id": "uuid",
+  "notification_id": "uuid"
+}
+```
+
+**Request (mark_all_read):**
+```json
+{
+  "action": "mark_all_read",
+  "f0_id": "uuid"
+}
+```
+
+**Request (delete):**
+```json
+{
+  "action": "delete",
+  "f0_id": "uuid",
+  "notification_id": "uuid"
+}
+```
+
+**Request (get_unread_count):**
+```json
+{
+  "action": "get_unread_count",
+  "f0_id": "uuid"
+}
+```
+
 ### `create-and-release-voucher-affiliate-internal` (v6)
 Creates and releases voucher for F1 customer via KiotViet API. Saves to `affiliate.voucher_affiliate_tracking` for F0 revenue tracking.
 
@@ -989,6 +1221,17 @@ src/
 - [x] Edge Function `verify-otp-bank` v1 (verify OTP, save bank info, send email)
 - [x] Database columns `bank_verified`, `bank_verified_at` in `f0_partners`
 - [x] ProfilePage bank tab with OTP modal and form locking
+- [x] Table `affiliate.withdrawal_requests` with JSONB structure
+- [x] Table `affiliate.notifications` with JSONB structure
+- [x] Views `api.withdrawal_requests`, `api.notifications` with INSTEAD OF triggers
+- [x] Edge Function `get-f0-dashboard-stats` v1 (F0 dashboard data)
+- [x] Edge Function `get-f0-referral-history` v1 (pagination, filters)
+- [x] Edge Function `manage-withdrawal-request` v1 (get/create/cancel)
+- [x] Edge Function `manage-notifications` v1 (get/mark_read/delete)
+- [x] DashboardPage connected to real data
+- [x] ReferralHistoryPage connected to real data with pagination
+- [x] WithdrawalPage connected to real data
+- [x] NotificationsPage connected to real data
 
 ### In Progress
 - [ ] Protected routes implementation

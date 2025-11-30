@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Wallet,
   DollarSign,
@@ -9,6 +10,9 @@ import {
   Eye,
   X,
   AlertTriangle,
+  Loader2,
+  RefreshCw,
+  Shield,
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -16,8 +20,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Table,
@@ -27,80 +29,123 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { MIN_WITHDRAWAL_AMOUNT } from '@/lib/constants';
 
-// Mock data for withdrawal history
-const mockWithdrawalHistory = [
-  {
-    id: 'WD001',
-    date: '2025-11-15',
-    amount: 5000000,
-    bankName: 'Vietcombank',
-    accountNumber: '1234567890',
-    accountHolder: 'NGUYEN VAN A',
-    status: 'completed',
-    note: 'Rút tiền định kỳ',
-  },
-  {
-    id: 'WD002',
-    date: '2025-11-10',
-    amount: 3000000,
-    bankName: 'Techcombank',
-    accountNumber: '0987654321',
-    accountHolder: 'NGUYEN VAN A',
-    status: 'processing',
-    note: '',
-  },
-  {
-    id: 'WD003',
-    date: '2025-11-05',
-    amount: 2500000,
-    bankName: 'Vietcombank',
-    accountNumber: '1234567890',
-    accountHolder: 'NGUYEN VAN A',
-    status: 'completed',
-    note: '',
-  },
-  {
-    id: 'WD004',
-    date: '2025-11-01',
-    amount: 1000000,
-    bankName: 'BIDV',
-    accountNumber: '5555666677',
-    accountHolder: 'NGUYEN VAN A',
-    status: 'pending',
-    note: 'Yêu cầu khẩn cấp',
-  },
-  {
-    id: 'WD005',
-    date: '2025-10-25',
-    amount: 500000,
-    bankName: 'VietinBank',
-    accountNumber: '8888999900',
-    accountHolder: 'NGUYEN VAN A',
-    status: 'rejected',
-    note: 'Số dư không đủ',
-  },
-];
+// Types
+interface BankInfo {
+  bankName: string | null;
+  accountNumber: string | null;
+  accountName: string | null;
+  branch: string | null;
+  verified: boolean;
+}
 
-// Mock balance data
-const mockBalanceData = {
-  availableBalance: 8300000, // 8,300,000 VND
-  pendingWithdrawals: 4000000, // 4,000,000 VND
-  totalWithdrawn: 11500000, // 11,500,000 VND
-};
+interface Balance {
+  totalCommission: number;
+  availableBalance: number;
+  pendingWithdrawals: number;
+  completedWithdrawals: number;
+}
+
+interface Withdrawal {
+  id: string;
+  amount: number;
+  status: string;
+  bankInfo: {
+    bank_name: string;
+    bank_account_number: string;
+    bank_account_name: string;
+    bank_branch?: string;
+  };
+  processingInfo: {
+    processed_by?: string;
+    processed_at?: string;
+    rejection_reason?: string;
+    transfer_reference?: string;
+    admin_note?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface WithdrawalData {
+  balance: Balance;
+  bankInfo: BankInfo;
+  withdrawals: Withdrawal[];
+  minWithdrawalAmount: number;
+}
 
 const WithdrawalPage = () => {
-  const [loading, setLoading] = useState(false);
-  const [showSuccessAlert, setShowSuccessAlert] = useState(false);
-  const [formData, setFormData] = useState({
-    amount: '',
-    bankName: '',
-    accountNumber: '',
-    accountHolder: '',
-    note: '',
-  });
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [data, setData] = useState<WithdrawalData | null>(null);
+  const [amount, setAmount] = useState('');
+  const [amountError, setAmountError] = useState('');
+
+  // Get F0 user from storage
+  const getF0User = () => {
+    const stored = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  // Fetch withdrawal data
+  const fetchWithdrawalData = async (showRefreshing = false) => {
+    const f0User = getF0User();
+    if (!f0User?.id) {
+      navigate('/f0/auth/login');
+      return;
+    }
+
+    if (showRefreshing) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            action: 'get',
+            f0_id: f0User.id,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || 'Không thể tải dữ liệu');
+        return;
+      }
+
+      setData(result.data);
+    } catch (err) {
+      console.error('Withdrawal data fetch error:', err);
+      toast.error('Có lỗi xảy ra khi tải dữ liệu');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWithdrawalData();
+  }, []);
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -116,6 +161,8 @@ const WithdrawalPage = () => {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   };
 
@@ -167,122 +214,194 @@ const WithdrawalPage = () => {
     }
   };
 
-  // Validate form
-  const validateForm = () => {
-    const errors: Record<string, string> = {};
-
-    if (!formData.amount) {
-      errors.amount = 'Vui lòng nhập số tiền';
-    } else if (parseFloat(formData.amount) < MIN_WITHDRAWAL_AMOUNT) {
-      errors.amount = `Số tiền rút tối thiểu là ${formatCurrency(MIN_WITHDRAWAL_AMOUNT)}`;
-    } else if (parseFloat(formData.amount) > mockBalanceData.availableBalance) {
-      errors.amount = 'Số dư không đủ';
-    }
-
-    if (!formData.bankName) {
-      errors.bankName = 'Vui lòng chọn ngân hàng';
-    }
-
-    if (!formData.accountNumber) {
-      errors.accountNumber = 'Vui lòng nhập số tài khoản';
-    } else if (!/^\d+$/.test(formData.accountNumber)) {
-      errors.accountNumber = 'Số tài khoản không hợp lệ';
-    }
-
-    if (!formData.accountHolder) {
-      errors.accountHolder = 'Vui lòng nhập tên chủ tài khoản';
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  // Handle form submit
-  const handleSubmit = (e: React.FormEvent) => {
+  // Handle submit withdrawal request
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) {
+    if (!data) return;
+
+    const f0User = getF0User();
+    if (!f0User?.id) {
+      navigate('/f0/auth/login');
       return;
     }
 
-    setLoading(true);
+    // Validate
+    const amountNum = parseInt(amount);
+    if (!amount || isNaN(amountNum)) {
+      setAmountError('Vui lòng nhập số tiền');
+      return;
+    }
 
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
-      setShowSuccessAlert(true);
-      setFormData({
-        amount: '',
-        bankName: '',
-        accountNumber: '',
-        accountHolder: '',
-        note: '',
-      });
-      setFormErrors({});
+    if (amountNum < data.minWithdrawalAmount) {
+      setAmountError(`Số tiền rút tối thiểu là ${formatCurrency(data.minWithdrawalAmount)}`);
+      return;
+    }
 
-      // Hide success alert after 5 seconds
-      setTimeout(() => setShowSuccessAlert(false), 5000);
-    }, 1500);
-  };
+    if (amountNum > data.balance.availableBalance) {
+      setAmountError('Số dư không đủ');
+      return;
+    }
 
-  // Handle view details
-  const handleViewDetails = (id: string) => {
-    toast.info(`Xem chi tiết yêu cầu rút tiền ${id} - Tính năng đang phát triển`);
+    setAmountError('');
+    setSubmitting(true);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            action: 'create',
+            f0_id: f0User.id,
+            amount: amountNum,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || 'Không thể tạo yêu cầu rút tiền');
+        return;
+      }
+
+      toast.success('Yêu cầu rút tiền đã được tạo thành công!');
+      setAmount('');
+      fetchWithdrawalData(true);
+    } catch (err) {
+      console.error('Create withdrawal error:', err);
+      toast.error('Có lỗi xảy ra');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // Handle cancel withdrawal
-  const handleCancelWithdrawal = (id: string) => {
-    if (confirm('Bạn có chắc chắn muốn hủy yêu cầu rút tiền này?')) {
-      toast.success(`Đã hủy yêu cầu rút tiền ${id}`);
+  const handleCancelWithdrawal = async (requestId: string) => {
+    if (!confirm('Bạn có chắc chắn muốn hủy yêu cầu rút tiền này?')) {
+      return;
+    }
+
+    const f0User = getF0User();
+    if (!f0User?.id) return;
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            action: 'cancel',
+            f0_id: f0User.id,
+            request_id: requestId,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        toast.error(result.error || 'Không thể hủy yêu cầu');
+        return;
+      }
+
+      toast.success('Đã hủy yêu cầu rút tiền');
+      fetchWithdrawalData(true);
+    } catch (err) {
+      console.error('Cancel withdrawal error:', err);
+      toast.error('Có lỗi xảy ra');
     }
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary-500 mx-auto mb-4" />
+          <p className="text-gray-600">Đang tải dữ liệu...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <p className="text-red-600 mb-4">Không thể tải dữ liệu</p>
+            <Button onClick={() => fetchWithdrawalData()}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Thử lại
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const { balance, bankInfo, withdrawals, minWithdrawalAmount } = data;
 
   // Balance cards data
   const balanceCards = [
     {
       title: 'Số Dư Khả Dụng',
-      value: formatCurrency(mockBalanceData.availableBalance),
+      value: formatCurrency(balance.availableBalance),
       icon: Wallet,
       color: 'text-green-600',
       bgColor: 'bg-green-50',
     },
     {
       title: 'Đang Chờ Rút',
-      value: formatCurrency(mockBalanceData.pendingWithdrawals),
+      value: formatCurrency(balance.pendingWithdrawals),
       icon: Clock,
       color: 'text-yellow-600',
       bgColor: 'bg-yellow-50',
     },
     {
       title: 'Đã Rút',
-      value: formatCurrency(mockBalanceData.totalWithdrawn),
+      value: formatCurrency(balance.completedWithdrawals),
       icon: TrendingDown,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
     },
   ];
 
+  // Check if bank is verified
+  const canWithdraw = bankInfo.verified && balance.availableBalance >= minWithdrawalAmount;
+  const hasPendingRequest = withdrawals.some(w => w.status === 'pending');
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Page Header */}
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Rút Tiền</h1>
-          <p className="text-gray-600 mt-1">
-            Quản lý số dư và yêu cầu rút tiền hoa hồng
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Rút Tiền</h1>
+            <p className="text-gray-600 mt-1">
+              Quản lý số dư và yêu cầu rút tiền hoa hồng
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchWithdrawalData(true)}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            Làm mới
+          </Button>
         </div>
-
-        {/* Success Alert */}
-        {showSuccessAlert && (
-          <Alert variant="success">
-            <AlertTitle>Yêu cầu rút tiền thành công!</AlertTitle>
-            <AlertDescription>
-              Yêu cầu của bạn đang được xử lý. Vui lòng kiểm tra lại sau 3-5 ngày làm
-              việc.
-            </AlertDescription>
-          </Alert>
-        )}
 
         {/* Balance Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
@@ -308,6 +427,24 @@ const WithdrawalPage = () => {
           })}
         </div>
 
+        {/* Bank Info Warning */}
+        {!bankInfo.verified && (
+          <Alert variant="warning">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Chưa xác minh tài khoản ngân hàng</AlertTitle>
+            <AlertDescription>
+              Bạn cần xác minh thông tin ngân hàng trước khi có thể rút tiền.
+              <Button
+                variant="link"
+                className="ml-2 p-0 h-auto"
+                onClick={() => navigate('/f0/profile')}
+              >
+                Xác minh ngay →
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Create Withdrawal Request */}
         <Card>
           <CardHeader>
@@ -316,27 +453,48 @@ const WithdrawalPage = () => {
               Tạo Yêu Cầu Rút Tiền
             </CardTitle>
             <CardDescription>
-              Điền thông tin để tạo yêu cầu rút tiền về tài khoản ngân hàng
+              Số tiền sẽ được chuyển vào tài khoản ngân hàng đã xác minh
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Bank Info Display */}
+            {bankInfo.verified && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield className="w-5 h-5 text-green-600" />
+                  <span className="font-medium text-green-800">Tài khoản nhận tiền (đã xác minh)</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500">Ngân hàng</p>
+                    <p className="font-medium">{bankInfo.bankName}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Số tài khoản</p>
+                    <p className="font-medium font-mono">{bankInfo.accountNumber}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Chủ tài khoản</p>
+                    <p className="font-medium">{bankInfo.accountName}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Warning Alert */}
-            <Alert variant="warning" className="mb-6">
-              <AlertTitle className="flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Lưu ý
-              </AlertTitle>
+            <Alert variant="info" className="mb-6">
+              <AlertTitle>Lưu ý</AlertTitle>
               <AlertDescription>
                 <ul className="list-disc list-inside space-y-1 text-sm mt-2">
-                  <li>Số tiền rút tối thiểu: {formatCurrency(MIN_WITHDRAWAL_AMOUNT)}</li>
-                  <li>Thời gian xử lý: 3-5 ngày làm việc</li>
-                  <li>Kiểm tra kỹ thông tin tài khoản trước khi gửi yêu cầu</li>
+                  <li>Số tiền rút tối thiểu: {formatCurrency(minWithdrawalAmount)}</li>
+                  <li>Thời gian xử lý: 1-3 ngày làm việc</li>
+                  <li>Bạn chỉ có thể tạo 1 yêu cầu rút tiền tại một thời điểm</li>
                 </ul>
               </AlertDescription>
             </Alert>
 
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="max-w-md">
                 {/* Amount */}
                 <div className="space-y-2">
                   <Label htmlFor="amount">
@@ -346,110 +504,44 @@ const WithdrawalPage = () => {
                     id="amount"
                     type="number"
                     placeholder="Nhập số tiền"
-                    value={formData.amount}
-                    onChange={(e) =>
-                      setFormData({ ...formData, amount: e.target.value })
-                    }
-                    className={formErrors.amount ? 'border-red-500' : ''}
+                    value={amount}
+                    onChange={(e) => {
+                      setAmount(e.target.value);
+                      setAmountError('');
+                    }}
+                    className={amountError ? 'border-red-500' : ''}
+                    disabled={!canWithdraw || hasPendingRequest}
                   />
-                  {formErrors.amount && (
-                    <p className="text-sm text-red-500">{formErrors.amount}</p>
+                  {amountError && (
+                    <p className="text-sm text-red-500">{amountError}</p>
                   )}
                   <p className="text-xs text-gray-500">
-                    Tối thiểu: {formatCurrency(MIN_WITHDRAWAL_AMOUNT)}
+                    Số dư khả dụng: {formatCurrency(balance.availableBalance)} | Tối thiểu: {formatCurrency(minWithdrawalAmount)}
                   </p>
                 </div>
-
-                {/* Bank Name */}
-                <div className="space-y-2">
-                  <Label htmlFor="bankName">
-                    Ngân hàng <span className="text-red-500">*</span>
-                  </Label>
-                  <Select
-                    id="bankName"
-                    value={formData.bankName}
-                    onChange={(e) =>
-                      setFormData({ ...formData, bankName: e.target.value })
-                    }
-                    className={formErrors.bankName ? 'border-red-500' : ''}
-                  >
-                    <option value="">Chọn ngân hàng</option>
-                    <option value="Vietcombank">Vietcombank</option>
-                    <option value="Techcombank">Techcombank</option>
-                    <option value="BIDV">BIDV</option>
-                    <option value="VietinBank">VietinBank</option>
-                    <option value="ACB">ACB</option>
-                    <option value="MB Bank">MB Bank</option>
-                    <option value="Sacombank">Sacombank</option>
-                    <option value="VPBank">VPBank</option>
-                  </Select>
-                  {formErrors.bankName && (
-                    <p className="text-sm text-red-500">{formErrors.bankName}</p>
-                  )}
-                </div>
-
-                {/* Account Number */}
-                <div className="space-y-2">
-                  <Label htmlFor="accountNumber">
-                    Số tài khoản <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="accountNumber"
-                    type="text"
-                    placeholder="Nhập số tài khoản"
-                    value={formData.accountNumber}
-                    onChange={(e) =>
-                      setFormData({ ...formData, accountNumber: e.target.value })
-                    }
-                    className={formErrors.accountNumber ? 'border-red-500' : ''}
-                  />
-                  {formErrors.accountNumber && (
-                    <p className="text-sm text-red-500">{formErrors.accountNumber}</p>
-                  )}
-                </div>
-
-                {/* Account Holder */}
-                <div className="space-y-2">
-                  <Label htmlFor="accountHolder">
-                    Tên chủ tài khoản <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="accountHolder"
-                    type="text"
-                    placeholder="NGUYEN VAN A"
-                    value={formData.accountHolder}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        accountHolder: e.target.value.toUpperCase(),
-                      })
-                    }
-                    className={formErrors.accountHolder ? 'border-red-500' : ''}
-                  />
-                  {formErrors.accountHolder && (
-                    <p className="text-sm text-red-500">{formErrors.accountHolder}</p>
-                  )}
-                  <p className="text-xs text-gray-500">Viết hoa không dấu</p>
-                </div>
-              </div>
-
-              {/* Note */}
-              <div className="space-y-2">
-                <Label htmlFor="note">Ghi chú (tùy chọn)</Label>
-                <Textarea
-                  id="note"
-                  placeholder="Nhập ghi chú nếu có..."
-                  value={formData.note}
-                  onChange={(e) => setFormData({ ...formData, note: e.target.value })}
-                  rows={3}
-                />
               </div>
 
               {/* Submit Button */}
-              <div className="flex justify-end">
-                <Button type="submit" disabled={loading} className="min-w-[200px]">
-                  {loading ? 'Đang xử lý...' : 'Gửi Yêu Cầu Rút Tiền'}
+              <div className="flex items-center gap-4">
+                <Button
+                  type="submit"
+                  disabled={!canWithdraw || submitting || hasPendingRequest}
+                  className="min-w-[200px]"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Đang xử lý...
+                    </>
+                  ) : (
+                    'Gửi Yêu Cầu Rút Tiền'
+                  )}
                 </Button>
+                {hasPendingRequest && (
+                  <p className="text-sm text-amber-600">
+                    Bạn đang có yêu cầu chờ xử lý. Vui lòng đợi yêu cầu hoàn tất.
+                  </p>
+                )}
               </div>
             </form>
           </CardContent>
@@ -462,95 +554,87 @@ const WithdrawalPage = () => {
             <CardDescription>Theo dõi trạng thái các yêu cầu rút tiền</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Mã Yêu Cầu</TableHead>
-                    <TableHead>Ngày Tạo</TableHead>
-                    <TableHead className="text-right">Số Tiền</TableHead>
-                    <TableHead>Thông Tin Ngân Hàng</TableHead>
-                    <TableHead>Trạng Thái</TableHead>
-                    <TableHead className="text-center">Thao Tác</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockWithdrawalHistory.length === 0 ? (
+            {withdrawals.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <Wallet className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">Chưa có lịch sử rút tiền</p>
+                <p className="text-sm mt-1">Tạo yêu cầu rút tiền đầu tiên của bạn</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center py-8 text-gray-500"
-                      >
-                        Chưa có lịch sử rút tiền
-                      </TableCell>
+                      <TableHead>Ngày Tạo</TableHead>
+                      <TableHead className="text-right">Số Tiền</TableHead>
+                      <TableHead>Thông Tin Ngân Hàng</TableHead>
+                      <TableHead>Trạng Thái</TableHead>
+                      <TableHead className="text-center">Thao Tác</TableHead>
                     </TableRow>
-                  ) : (
-                    mockWithdrawalHistory.map((withdrawal) => {
+                  </TableHeader>
+                  <TableBody>
+                    {withdrawals.map((withdrawal) => {
                       const StatusIcon = getStatusIcon(withdrawal.status);
                       return (
                         <TableRow key={withdrawal.id}>
-                          <TableCell className="font-medium">
-                            {withdrawal.id}
-                          </TableCell>
                           <TableCell className="text-gray-600">
-                            {formatDate(withdrawal.date)}
+                            {formatDate(withdrawal.createdAt)}
                           </TableCell>
                           <TableCell className="text-right font-semibold text-primary-600">
                             {formatCurrency(withdrawal.amount)}
                           </TableCell>
                           <TableCell>
                             <div className="text-sm">
-                              <div className="font-medium">{withdrawal.bankName}</div>
-                              <div className="text-gray-600">
-                                {withdrawal.accountNumber}
+                              <div className="font-medium">{withdrawal.bankInfo.bank_name}</div>
+                              <div className="text-gray-600 font-mono">
+                                {withdrawal.bankInfo.bank_account_number}
                               </div>
                               <div className="text-gray-500 text-xs">
-                                {withdrawal.accountHolder}
+                                {withdrawal.bankInfo.bank_account_name}
                               </div>
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={getStatusVariant(withdrawal.status)}
-                              className="flex items-center gap-1 w-fit"
-                            >
-                              <StatusIcon className="w-3 h-3" />
-                              {getStatusLabel(withdrawal.status)}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleViewDetails(withdrawal.id)}
-                                className="flex items-center gap-1"
+                            <div>
+                              <Badge
+                                variant={getStatusVariant(withdrawal.status)}
+                                className="flex items-center gap-1 w-fit"
                               >
-                                <Eye className="w-3 h-3" />
-                                Xem
-                              </Button>
-                              {withdrawal.status === 'pending' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    handleCancelWithdrawal(withdrawal.id)
-                                  }
-                                  className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                >
-                                  <X className="w-3 h-3" />
-                                  Hủy
-                                </Button>
+                                <StatusIcon className="w-3 h-3" />
+                                {getStatusLabel(withdrawal.status)}
+                              </Badge>
+                              {withdrawal.status === 'rejected' && withdrawal.processingInfo?.rejection_reason && (
+                                <p className="text-xs text-red-500 mt-1">
+                                  Lý do: {withdrawal.processingInfo.rejection_reason}
+                                </p>
+                              )}
+                              {withdrawal.status === 'completed' && withdrawal.processingInfo?.transfer_reference && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Mã GD: {withdrawal.processingInfo.transfer_reference}
+                                </p>
                               )}
                             </div>
                           </TableCell>
+                          <TableCell className="text-center">
+                            {withdrawal.status === 'pending' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleCancelWithdrawal(withdrawal.id)}
+                                className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <X className="w-3 h-3" />
+                                Hủy
+                              </Button>
+                            )}
+                          </TableCell>
                         </TableRow>
                       );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

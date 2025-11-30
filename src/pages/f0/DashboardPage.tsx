@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users,
@@ -8,14 +8,13 @@ import {
   Link as LinkIcon,
   UserPlus,
   CreditCard,
-  ArrowUpRight,
-  ArrowDownRight,
   Award,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import {
   Table,
   TableBody,
@@ -24,74 +23,140 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { TIER_CONFIGS } from '@/lib/constants';
+import { TIER_CONFIGS, TIER_ORDER, TIER_LOGOS, TIER_PROGRESS_COLORS, TIER_ICONS, TIER_GRADIENTS } from '@/lib/constants';
 
-// Mock data for demonstration
-const mockUserData = {
-  name: 'Nguyễn Văn A',
-  currentTier: 'gold',
-  totalReferrals: 18,
-  activeCustomers: 15,
-  totalCommission: 12500000, // 12,500,000 VND
-  availableBalance: 8300000, // 8,300,000 VND
-};
+// Types for dashboard data
+interface DashboardStats {
+  totalReferrals: number;
+  activeCustomers: number;
+  referralsThisQuarter: number;
+  totalCommission: number;
+  paidCommission: number;
+  availableBalance: number;
+  pendingWithdrawals: number;
+  completedWithdrawals: number;
+  totalF1Revenue: number; // Total revenue from F1 customers
+}
 
-const mockRecentActivity = [
-  {
-    id: 1,
-    customerName: 'Trần Thị B',
-    date: '2025-11-15',
-    status: 'completed',
-    commission: 450000,
-  },
-  {
-    id: 2,
-    customerName: 'Lê Văn C',
-    date: '2025-11-14',
-    status: 'active',
-    commission: 380000,
-  },
-  {
-    id: 3,
-    customerName: 'Phạm Thị D',
-    date: '2025-11-13',
-    status: 'pending',
-    commission: 520000,
-  },
-  {
-    id: 4,
-    customerName: 'Hoàng Văn E',
-    date: '2025-11-12',
-    status: 'completed',
-    commission: 410000,
-  },
-  {
-    id: 5,
-    customerName: 'Vũ Thị F',
-    date: '2025-11-11',
-    status: 'active',
-    commission: 390000,
-  },
-];
+interface TierInfo {
+  current: string;
+  currentName: string;
+  next: string | null;
+  nextName: string | null;
+  referralsToNextTier: number;
+  revenueToNextTier: number;
+  currentMinReferrals: number;
+  currentMinRevenue: number;
+  nextMinReferrals: number;
+  nextMinRevenue: number;
+  tierList: Array<{
+    code: string;
+    name: string;
+    level: number;
+    minReferrals: number;
+    minRevenue: number;
+    benefits: Record<string, unknown>;
+    display: Record<string, unknown>;
+  }>;
+}
+
+interface RecentActivity {
+  id: string;
+  customerName: string;
+  phone: string;
+  voucherCode: string;
+  status: string;
+  date: string;
+  campaignCode: string;
+}
+
+interface F0Info {
+  id: string;
+  fullName: string;
+  f0Code: string;
+  email: string;
+  phone: string;
+  isActive: boolean;
+  isApproved: boolean;
+  joinedAt: string;
+}
+
+interface DashboardData {
+  f0Info: F0Info;
+  stats: DashboardStats;
+  tier: TierInfo;
+  recentActivity: RecentActivity[];
+  unreadNotifications: number;
+}
 
 const DashboardPage = () => {
   const navigate = useNavigate();
-  const [userData] = useState(mockUserData);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const currentTierConfig = TIER_CONFIGS[userData.currentTier];
-  const nextTier = getNextTier(userData.currentTier);
-  const nextTierConfig = nextTier ? TIER_CONFIGS[nextTier] : null;
+  // Get F0 user from storage
+  const getF0User = () => {
+    const stored = localStorage.getItem('f0_user') || sessionStorage.getItem('f0_user');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
 
-  // Calculate progress to next tier
-  const progressPercentage = nextTierConfig
-    ? ((userData.totalReferrals - currentTierConfig.minReferrals) /
-        (nextTierConfig.minReferrals - currentTierConfig.minReferrals)) *
-      100
-    : 100;
+  // Fetch dashboard data
+  const fetchDashboardData = async (showRefreshing = false) => {
+    const f0User = getF0User();
+    if (!f0User?.id) {
+      navigate('/f0/auth/login');
+      return;
+    }
 
-  const referralsToNextTier = nextTierConfig
-    ? nextTierConfig.minReferrals - userData.totalReferrals
-    : 0;
+    if (showRefreshing) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-f0-dashboard-stats`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ f0_id: f0User.id }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!result.success) {
+        setError(result.error || 'Không thể tải dữ liệu dashboard');
+        return;
+      }
+
+      setDashboardData(result.data);
+    } catch (err) {
+      console.error('Dashboard fetch error:', err);
+      setError('Có lỗi xảy ra khi tải dữ liệu');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -113,70 +178,109 @@ const DashboardPage = () => {
   // Get status badge variant
   const getStatusVariant = (status: string) => {
     switch (status) {
-      case 'completed':
+      case 'Đã sử dụng':
         return 'success';
-      case 'active':
+      case 'Đã kích hoạt':
         return 'info';
-      case 'pending':
-        return 'warning';
+      case 'Chờ kích hoạt':
       default:
-        return 'default';
+        return 'warning';
     }
   };
 
-  // Get status label
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return 'Hoàn thành';
-      case 'active':
-        return 'Đang hoạt động';
-      case 'pending':
-        return 'Chờ xử lý';
-      default:
-        return status;
-    }
+  // Get tier config from tier code
+  const getTierConfig = (tierCode: string) => {
+    return TIER_CONFIGS[tierCode] || TIER_CONFIGS['silver'];
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary-500 mx-auto mb-4" />
+          <p className="text-gray-600">Đang tải dữ liệu...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error || !dashboardData) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full">
+          <CardContent className="pt-6 text-center">
+            <p className="text-red-600 mb-4">{error || 'Không thể tải dữ liệu'}</p>
+            <Button onClick={() => fetchDashboardData()}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Thử lại
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const { f0Info, stats, tier, recentActivity, unreadNotifications } = dashboardData;
+  const currentTierConfig = getTierConfig(tier.current);
+  const nextTierConfig = tier.next ? getTierConfig(tier.next) : null;
+
+  // Get next tier requirements from API response (dynamic from database)
+  // Fallback to constants only if API doesn't provide values
+  const nextTierMinReferrals = tier.nextMinReferrals || nextTierConfig?.minReferrals || 0;
+  const nextTierMinRevenue = tier.nextMinRevenue || nextTierConfig?.minRevenue || 0;
+
+  // Calculate F1 referral progress (50% of total)
+  // Progress = current / target (not relative to current tier)
+  const f1Progress = nextTierMinReferrals > 0
+    ? Math.min(100, (stats.referralsThisQuarter / nextTierMinReferrals) * 100)
+    : 100;
+
+  // Calculate F1 revenue progress (50% of total)
+  const f1RevenueProgress = nextTierMinRevenue > 0
+    ? Math.min(100, ((stats.totalF1Revenue || 0) / nextTierMinRevenue) * 100)
+    : 100;
+
+  // Overall progress = 50% F1 progress + 50% Revenue progress
+  // Only show 100% if at max tier (no nextTierConfig)
+  const progressPercentage = nextTierConfig
+    ? (f1Progress * 0.5) + (f1RevenueProgress * 0.5)
+    : 100;
 
   // Statistics cards data
   const statsCards = [
     {
       title: 'Tổng giới thiệu',
-      value: userData.totalReferrals,
-      trend: '+12%',
-      trendUp: true,
+      value: stats.totalReferrals,
+      subValue: `${stats.referralsThisQuarter} quý này`,
       icon: Users,
-      description: 'So với tháng trước',
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
     },
     {
       title: 'Khách hàng hoạt động',
-      value: userData.activeCustomers,
-      trend: '+8%',
-      trendUp: true,
+      value: stats.activeCustomers,
+      subValue: 'Đã kích hoạt voucher',
       icon: TrendingUp,
-      description: 'Tăng trưởng',
       color: 'text-green-600',
       bgColor: 'bg-green-50',
     },
     {
       title: 'Tổng hoa hồng',
-      value: formatCurrency(userData.totalCommission),
-      trend: '+23%',
-      trendUp: true,
+      value: formatCurrency(stats.totalCommission),
+      subValue: `Đã nhận: ${formatCurrency(stats.paidCommission)}`,
       icon: DollarSign,
-      description: 'Tích lũy',
       color: 'text-yellow-600',
       bgColor: 'bg-yellow-50',
     },
     {
       title: 'Số dư khả dụng',
-      value: formatCurrency(userData.availableBalance),
-      trend: '-5%',
-      trendUp: false,
+      value: formatCurrency(stats.availableBalance),
+      subValue: stats.pendingWithdrawals > 0
+        ? `Đang rút: ${formatCurrency(stats.pendingWithdrawals)}`
+        : 'Có thể rút',
       icon: Wallet,
-      description: 'Có thể rút',
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
     },
@@ -189,12 +293,28 @@ const DashboardPage = () => {
         <div className="bg-gradient-to-r from-primary-500 to-primary-600 rounded-lg p-6 md:p-8 text-white shadow-lg">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h1 className="text-2xl md:text-3xl font-bold mb-2">
-                Xin chào, {userData.name}!
-              </h1>
+              <div className="flex items-center gap-2 mb-2">
+                <h1 className="text-2xl md:text-3xl font-bold">
+                  Xin chào, {f0Info.fullName}!
+                </h1>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-white hover:bg-white/20"
+                  onClick={() => fetchDashboardData(true)}
+                  disabled={refreshing}
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
               <p className="text-primary-100 text-sm md:text-base">
-                Chào mừng bạn quay trở lại với hệ thống Affiliate
+                Mã đối tác: <span className="font-semibold">{f0Info.f0Code}</span>
               </p>
+              {unreadNotifications > 0 && (
+                <p className="text-primary-100 text-sm mt-1">
+                  Bạn có <span className="font-semibold text-yellow-300">{unreadNotifications}</span> thông báo chưa đọc
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <Award className="w-8 h-8 md:w-10 md:h-10" />
@@ -219,16 +339,16 @@ const DashboardPage = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-primary-400">
             <div>
               <p className="text-primary-100 text-xs">Giới thiệu</p>
-              <p className="text-2xl font-bold">{userData.totalReferrals}</p>
+              <p className="text-2xl font-bold">{stats.totalReferrals}</p>
             </div>
             <div>
               <p className="text-primary-100 text-xs">Hoạt động</p>
-              <p className="text-2xl font-bold">{userData.activeCustomers}</p>
+              <p className="text-2xl font-bold">{stats.activeCustomers}</p>
             </div>
             <div className="col-span-2 md:col-span-2">
               <p className="text-primary-100 text-xs">Số dư khả dụng</p>
               <p className="text-xl md:text-2xl font-bold">
-                {formatCurrency(userData.availableBalance)}
+                {formatCurrency(stats.availableBalance)}
               </p>
             </div>
           </div>
@@ -238,7 +358,6 @@ const DashboardPage = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {statsCards.map((stat, index) => {
             const Icon = stat.icon;
-            const TrendIcon = stat.trendUp ? ArrowUpRight : ArrowDownRight;
             return (
               <Card key={index} className="hover:shadow-md transition-shadow">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -253,120 +372,274 @@ const DashboardPage = () => {
                   <div className="text-2xl font-bold text-gray-900">
                     {stat.value}
                   </div>
-                  <div className="flex items-center mt-2 text-xs">
-                    <TrendIcon
-                      className={`w-3 h-3 mr-1 ${
-                        stat.trendUp ? 'text-green-600' : 'text-red-600'
-                      }`}
-                    />
-                    <span
-                      className={
-                        stat.trendUp ? 'text-green-600' : 'text-red-600'
-                      }
-                    >
-                      {stat.trend}
-                    </span>
-                    <span className="text-gray-500 ml-1">{stat.description}</span>
-                  </div>
+                  <p className="text-xs text-gray-500 mt-1">{stat.subValue}</p>
                 </CardContent>
               </Card>
             );
           })}
         </div>
 
-        {/* Tier Progress Section */}
-        <Card>
-          <CardHeader>
+        {/* Tier Progress Section - Light Theme with 2 EXP Bars */}
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2">
               <Award className="w-5 h-5 text-primary-500" />
-              Tiến độ thăng hạng
+              Tiến độ lên hạng
             </CardTitle>
             <CardDescription>
-              Theo dõi tiến trình của bạn để lên hạng tiếp theo
+              Hoàn thành yêu cầu để lên hạng tiếp theo
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Current Tier Info */}
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge
-                    style={{
-                      backgroundColor: currentTierConfig.color,
-                      color: currentTierConfig.name === 'silver' ? '#000' : '#fff',
+          <CardContent className="pt-0">
+            <div className="flex flex-col lg:flex-row items-center gap-6">
+              {/* Left: Circular Progress with Tier Logo */}
+              <div className="flex items-center gap-6">
+                {/* Current Tier Logo */}
+                <div className="flex flex-col items-center">
+                  <img
+                    src={TIER_LOGOS[tier.current.toLowerCase()] || TIER_LOGOS.bronze}
+                    alt={currentTierConfig.displayName}
+                    className="w-20 h-20 object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
                     }}
-                  >
-                    {currentTierConfig.displayName}
-                  </Badge>
-                  <span className="text-sm text-gray-600">
-                    ({userData.totalReferrals} giới thiệu)
-                  </span>
+                  />
+                  <span className="text-gray-700 font-semibold mt-2 text-sm">{currentTierConfig.displayName}</span>
                 </div>
-                <ul className="space-y-1 text-sm text-gray-600">
-                  {currentTierConfig.benefits.map((benefit, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="text-green-500 mt-0.5">✓</span>
-                      <span>{benefit}</span>
-                    </li>
-                  ))}
-                </ul>
+
+                {/* Circular Progress Ring */}
+                <div className="relative">
+                  <svg className="w-32 h-32 transform -rotate-90">
+                    {/* Background circle */}
+                    <circle
+                      cx="64"
+                      cy="64"
+                      r="56"
+                      fill="none"
+                      stroke="#E5E7EB"
+                      strokeWidth="10"
+                    />
+                    {/* Progress circle */}
+                    <circle
+                      cx="64"
+                      cy="64"
+                      r="56"
+                      fill="none"
+                      stroke={TIER_PROGRESS_COLORS[tier.next || tier.current]?.primary || '#10B981'}
+                      strokeWidth="10"
+                      strokeLinecap="round"
+                      strokeDasharray={`${progressPercentage * 3.52} 352`}
+                      className="transition-all duration-1000 ease-out"
+                    />
+                  </svg>
+                  {/* Percentage text in center */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-bold text-gray-800">{Math.round(progressPercentage)}%</span>
+                    <span className="text-xs text-gray-500">Tổng tiến độ</span>
+                  </div>
+                </div>
+
+                {/* Next Tier Logo (if not max tier) */}
+                {nextTierConfig && (
+                  <div className="flex flex-col items-center opacity-50">
+                    <img
+                      src={TIER_LOGOS[tier.next?.toLowerCase() || 'silver']}
+                      alt={nextTierConfig.displayName}
+                      className="w-20 h-20 object-contain grayscale"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                    <span className="text-gray-500 font-medium mt-2 text-sm">{nextTierConfig.displayName}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: EXP Bars */}
+              <div className="flex-1 w-full space-y-4">
+                {/* EXP Bar 1: F1 Count */}
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-500" />
+                      <span className="text-sm font-medium text-gray-700">Số lượng F1</span>
+                    </div>
+                    {nextTierConfig ? (
+                      <span className="text-sm text-gray-600">
+                        <span className="font-semibold text-blue-600">{stats.referralsThisQuarter}</span>
+                        <span className="text-gray-400"> / </span>
+                        <span>{nextTierMinReferrals}</span>
+                      </span>
+                    ) : (
+                      <span className="text-sm text-green-600 font-medium">Đã đạt tối đa</span>
+                    )}
+                  </div>
+                  <div className="h-4 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{
+                        width: `${Math.min(f1Progress, 100)}%`,
+                        background: 'linear-gradient(90deg, #3B82F6, #1D4ED8)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* EXP Bar 2: F1 Revenue */}
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="w-4 h-4 text-green-500" />
+                      <span className="text-sm font-medium text-gray-700">Doanh thu F1</span>
+                    </div>
+                    {nextTierConfig ? (
+                      <span className="text-sm text-gray-600">
+                        <span className="font-semibold text-green-600">{formatCurrency(stats.totalF1Revenue || 0)}</span>
+                        <span className="text-gray-400"> / </span>
+                        <span>{formatCurrency(nextTierMinRevenue)}</span>
+                      </span>
+                    ) : (
+                      <span className="text-sm text-green-600 font-medium">Đã đạt tối đa</span>
+                    )}
+                  </div>
+                  <div className="h-4 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700 ease-out"
+                      style={{
+                        width: `${Math.min(f1RevenueProgress, 100)}%`,
+                        background: 'linear-gradient(90deg, #10B981, #059669)'
+                      }}
+                    />
+                  </div>
+                </div>
+
               </div>
             </div>
 
-            {/* Progress Bar */}
-            {nextTierConfig && (
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">
-                    Tiến độ đến hạng {nextTierConfig.displayName}
-                  </span>
-                  <span className="font-semibold text-primary-600">
-                    {userData.totalReferrals} / {nextTierConfig.minReferrals}
-                  </span>
-                </div>
-                <Progress
-                  value={userData.totalReferrals - currentTierConfig.minReferrals}
-                  max={nextTierConfig.minReferrals - currentTierConfig.minReferrals}
-                  className="h-3"
-                />
-                <p className="text-xs text-gray-500">
-                  Còn {referralsToNextTier} giới thiệu nữa để đạt hạng{' '}
-                  {nextTierConfig.displayName}
-                </p>
-              </div>
-            )}
+            {/* Tier Progression Timeline */}
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <div className="flex items-center justify-between">
+                {TIER_ORDER.map((tierKey, index) => {
+                  const config = TIER_CONFIGS[tierKey];
+                  const isCurrentTier = tier.current.toLowerCase() === tierKey;
+                  const isPastTier = TIER_ORDER.indexOf(tier.current.toLowerCase() as typeof TIER_ORDER[number]) > index;
+                  const tierIndex = TIER_ORDER.indexOf(tier.current.toLowerCase() as typeof TIER_ORDER[number]);
 
-            {/* Next Tier Preview */}
-            {nextTierConfig && (
-              <div className="bg-gray-50 rounded-lg p-4 border-2 border-dashed border-gray-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge
-                    style={{
-                      backgroundColor: nextTierConfig.color,
-                      color: nextTierConfig.name === 'silver' ? '#000' : '#fff',
-                    }}
-                  >
-                    {nextTierConfig.displayName}
-                  </Badge>
-                  <span className="text-sm text-gray-600 font-semibold">
-                    Hạng tiếp theo
-                  </span>
+                  return (
+                    <div key={tierKey} className="flex flex-col items-center flex-1 relative">
+                      {/* Connector line */}
+                      {index > 0 && (
+                        <div
+                          className={`absolute top-5 right-1/2 w-full h-0.5 -z-0 ${
+                            index <= tierIndex ? 'bg-primary-500' : 'bg-gray-300'
+                          }`}
+                        />
+                      )}
+                      {/* Tier badge */}
+                      <div className={`relative z-10 w-12 h-12 rounded-full flex items-center justify-center bg-white ${
+                        isCurrentTier
+                          ? 'ring-2 ring-primary-500 ring-offset-2'
+                          : ''
+                      }`}>
+                        <img
+                          src={TIER_LOGOS[tierKey]}
+                          alt={config.displayName}
+                          className={`w-10 h-10 object-contain ${
+                            isPastTier || isCurrentTier ? 'opacity-100' : 'opacity-40 grayscale'
+                          }`}
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            target.parentElement!.innerHTML = `<span class="text-xl">${TIER_ICONS[tierKey]}</span>`;
+                          }}
+                        />
+                      </div>
+                      <span className={`text-xs mt-2 font-medium ${
+                        isCurrentTier ? 'text-primary-600' : isPastTier ? 'text-gray-700' : 'text-gray-400'
+                      }`}>
+                        {config.displayName}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {config.minReferrals}+ F1
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Benefits Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Current Tier Benefits */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <img
+                  src={TIER_LOGOS[tier.current.toLowerCase()]}
+                  alt={currentTierConfig.displayName}
+                  className="w-10 h-10 object-contain"
+                />
+                <div>
+                  <CardTitle className="text-base">Quyền lợi hiện tại</CardTitle>
+                  <CardDescription>Hạng {currentTierConfig.displayName}</CardDescription>
                 </div>
-                <p className="text-xs text-gray-600 mb-2">
-                  Quyền lợi khi đạt hạng {nextTierConfig.displayName}:
-                </p>
-                <ul className="space-y-1 text-xs text-gray-600">
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2">
+                {currentTierConfig.benefits.map((benefit, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-sm">
+                    <span className="text-green-500 mt-0.5 flex-shrink-0">✓</span>
+                    <span className="text-gray-700">{benefit}</span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+
+          {/* Next Tier Benefits */}
+          {nextTierConfig ? (
+            <Card className={`bg-gradient-to-br ${TIER_GRADIENTS[tier.next || 'silver']} text-white border-0`}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={TIER_LOGOS[tier.next?.toLowerCase() || 'silver']}
+                    alt={nextTierConfig.displayName}
+                    className="w-10 h-10 object-contain"
+                  />
+                  <div>
+                    <CardTitle className="text-base text-white">Hạng tiếp theo</CardTitle>
+                    <CardDescription className="text-white/80">
+                      Còn {tier.referralsToNextTier} GT để đạt
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
                   {nextTierConfig.benefits.map((benefit, idx) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="text-primary-500 mt-0.5">→</span>
-                      <span>{benefit}</span>
+                    <li key={idx} className="flex items-start gap-2 text-sm">
+                      <span className="text-white/80 mt-0.5 flex-shrink-0">→</span>
+                      <span className="text-white/90">{benefit}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="bg-gradient-to-br from-amber-400 to-orange-500 text-white border-0">
+              <CardContent className="flex flex-col items-center justify-center py-8">
+                <span className="text-5xl mb-3">👑</span>
+                <h4 className="font-bold text-lg">Hạng Cao Nhất!</h4>
+                <p className="text-white/80 text-sm mt-2 text-center">
+                  Bạn đang tận hưởng tất cả quyền lợi tốt nhất
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Recent Activity Section */}
         <Card>
@@ -375,46 +648,65 @@ const DashboardPage = () => {
             <CardDescription>5 giới thiệu gần nhất của bạn</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Khách hàng</TableHead>
-                    <TableHead>Ngày</TableHead>
-                    <TableHead>Trạng thái</TableHead>
-                    <TableHead className="text-right">Hoa hồng</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockRecentActivity.map((activity) => (
-                    <TableRow key={activity.id}>
-                      <TableCell className="font-medium">
-                        {activity.customerName}
-                      </TableCell>
-                      <TableCell className="text-gray-600">
-                        {formatDate(activity.date)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={getStatusVariant(activity.status)}>
-                          {getStatusLabel(activity.status)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold text-primary-600">
-                        {formatCurrency(activity.commission)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="mt-4 text-center">
-              <Button
-                variant="outline"
-                onClick={() => navigate('/f0/referrals')}
-              >
-                Xem tất cả giới thiệu
-              </Button>
-            </div>
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>Chưa có hoạt động giới thiệu nào</p>
+                <Button
+                  variant="outline"
+                  className="mt-4"
+                  onClick={() => navigate('/f0/refer-customer')}
+                >
+                  Giới thiệu khách hàng đầu tiên
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Khách hàng</TableHead>
+                        <TableHead>Mã voucher</TableHead>
+                        <TableHead>Ngày</TableHead>
+                        <TableHead>Trạng thái</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recentActivity.map((activity) => (
+                        <TableRow key={activity.id}>
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{activity.customerName}</p>
+                              <p className="text-xs text-gray-500">{activity.phone}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {activity.voucherCode}
+                          </TableCell>
+                          <TableCell className="text-gray-600">
+                            {formatDate(activity.date)}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getStatusVariant(activity.status)}>
+                              {activity.status || 'Chờ kích hoạt'}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="mt-4 text-center">
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate('/f0/referral-history')}
+                  >
+                    Xem tất cả giới thiệu
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -431,7 +723,7 @@ const DashboardPage = () => {
               <Button
                 className="h-auto py-4 flex-col items-start gap-2"
                 variant="outline"
-                onClick={() => navigate('/f0/referral-links')}
+                onClick={() => navigate('/f0/create-link')}
               >
                 <div className="flex items-center gap-2 w-full">
                   <div className="bg-primary-50 p-2 rounded-lg">
@@ -447,7 +739,7 @@ const DashboardPage = () => {
               <Button
                 className="h-auto py-4 flex-col items-start gap-2"
                 variant="outline"
-                onClick={() => navigate('/f0/referrals/new')}
+                onClick={() => navigate('/f0/refer-customer')}
               >
                 <div className="flex items-center gap-2 w-full">
                   <div className="bg-green-50 p-2 rounded-lg">
@@ -463,7 +755,7 @@ const DashboardPage = () => {
               <Button
                 className="h-auto py-4 flex-col items-start gap-2"
                 variant="outline"
-                onClick={() => navigate('/f0/withdrawals')}
+                onClick={() => navigate('/f0/withdrawal')}
               >
                 <div className="flex items-center gap-2 w-full">
                   <div className="bg-purple-50 p-2 rounded-lg">
@@ -482,15 +774,5 @@ const DashboardPage = () => {
     </div>
   );
 };
-
-// Helper function to get next tier
-function getNextTier(currentTier: string): string | null {
-  const tierOrder = ['silver', 'gold', 'diamond'];
-  const currentIndex = tierOrder.indexOf(currentTier);
-  if (currentIndex < tierOrder.length - 1) {
-    return tierOrder[currentIndex + 1];
-  }
-  return null;
-}
 
 export default DashboardPage;

@@ -135,6 +135,27 @@ VITE_SUPABASE_URL=your_supabase_url
 | activation_status | VARCHAR(50) | Status (Đã kích hoạt, Đã sử dụng) |
 | expired_at | TIMESTAMPTZ | Expiration date |
 
+#### Table: `withdrawal_requests` (JSONB)
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| amount | DECIMAL(15,2) | Withdrawal amount |
+| status | VARCHAR(20) | pending/approved/rejected/completed |
+| bank_info | JSONB | Bank details |
+| processing_info | JSONB | Processing details |
+| created_at | TIMESTAMPTZ | Request date |
+
+#### Table: `notifications` (JSONB)
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| f0_id | UUID | FK to f0_partners |
+| type | VARCHAR(50) | referral/commission/withdrawal/announcement/alert/system |
+| content | JSONB | Notification content (title, message, etc.) |
+| is_read | BOOLEAN | Read status |
+| created_at | TIMESTAMPTZ | Created date |
+
 ### Schema: `api`
 Views exposing `affiliate` tables for API access:
 - `api.f0_partners` → view of `affiliate.f0_partners`
@@ -144,6 +165,9 @@ Views exposing `affiliate` tables for API access:
 - `api.referral_links` → view of `affiliate.referral_links`
 - `api.voucher_affiliate_tracking` → view of `affiliate.voucher_affiliate_tracking`
 - `api.all_voucher_tracking` → unified view (regular + affiliate vouchers)
+- `api.withdrawal_requests` → view of `affiliate.withdrawal_requests`
+- `api.notifications` → view of `affiliate.notifications`
+- `api.f0_tiers` → view of `affiliate.f0_tiers` (tier configuration)
 
 ## Supabase Edge Functions
 
@@ -159,6 +183,10 @@ Views exposing `affiliate` tables for API access:
 | `create-and-release-voucher-affiliate-internal` | v6 | Issue voucher for F1 customer via KiotViet API, saves to voucher_affiliate_tracking, updates JSONB conversion_count |
 | `send-otp-bank-verification` | v1 | Send OTP for bank info verification (F0 ProfilePage) |
 | `verify-otp-bank` | v1 | Verify OTP, save bank info, send confirmation email |
+| `get-f0-dashboard-stats` | v9 | Get F0 dashboard stats (referrals, commissions, tier from DB, activity) |
+| `get-f0-referral-history` | v1 | Get F0 referral history with pagination and filters |
+| `manage-withdrawal-request` | v1 | Manage F0 withdrawal requests (get/create/cancel) |
+| `manage-notifications` | v1 | Manage F0 notifications (get/mark_read/delete) |
 
 ### Vihat API Configuration
 
@@ -343,6 +371,14 @@ src/
 - [x] Edge Function `send-otp-bank-verification` v1
 - [x] Edge Function `verify-otp-bank` v1
 - [x] Database columns `bank_verified`, `bank_verified_at`
+- [x] Table `withdrawal_requests` with JSONB structure
+- [x] Table `notifications` with JSONB structure
+- [x] Views `api.withdrawal_requests`, `api.notifications`
+- [x] Edge Function `get-f0-dashboard-stats` v1
+- [x] Edge Function `get-f0-referral-history` v1
+- [x] Edge Function `manage-withdrawal-request` v1
+- [x] Edge Function `manage-notifications` v1
+- [x] F0 Pages connected to real data (Dashboard, ReferralHistory, Withdrawal, Notifications)
 - [ ] Row Level Security (RLS)
 
 ### Phase 5: Deployment
@@ -368,4 +404,4 @@ Private - Mat Kinh Tam Duc
 
 ---
 
-**Status**: Phase 4 Complete (F0 + F1 Flow Working) | Admin moved to separate project
+**Status**: Phase 4 Complete (F0 Portal fully working with real data) | Admin moved to separate project

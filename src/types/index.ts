@@ -1,7 +1,7 @@
 // User & Authentication Types
 export type UserRole = 'f0' | 'admin';
 
-export type Tier = 'silver' | 'gold' | 'diamond';
+export type Tier = 'bronze' | 'silver' | 'gold' | 'diamond';
 
 export interface User {
   id: string;
@@ -28,8 +28,9 @@ export interface F0Profile extends User {
 export interface TierConfig {
   name: Tier;
   displayName: string;
-  minReferrals: number;
+  minReferrals: number;    // From DB: requirements.min_referrals
   maxReferrals: number;
+  minRevenue: number;      // From DB: requirements.min_revenue
   firstOrderCommission: number; // 0.10 = 10%
   lifetimeCommission: number; // 0.05 = 5%, 0.08 = 8%
   color: string;
@@ -166,6 +167,7 @@ export interface F0DashboardStats {
   currentTier: Tier;
   quarterReferrals: number;
   tierProgress: number; // 0-100
+  totalF1Revenue: number; // Total revenue from F1 customers
 }
 
 export interface AdminDashboardStats {

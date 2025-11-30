@@ -347,11 +347,11 @@ const ProfilePage = () => {
       }
 
       // Update local storage
-      const updatedUser = {
+      const updatedUser: F0User = {
         ...f0User,
-        date_of_birth: userData.dateOfBirth || null,
-        gender: userData.gender || null,
-        address: userData.address || null,
+        date_of_birth: userData.dateOfBirth || undefined,
+        gender: userData.gender || undefined,
+        address: userData.address || undefined,
       };
       setF0User(updatedUser);
       if (localStorage.getItem('f0_user')) {
@@ -1345,7 +1345,7 @@ const ProfilePage = () => {
                 {[0, 1, 2, 3, 4, 5].map((index) => (
                   <input
                     key={index}
-                    ref={(el) => (otpInputRefs.current[index] = el)}
+                    ref={(el) => { otpInputRefs.current[index] = el; }}
                     type="text"
                     inputMode="numeric"
                     maxLength={1}
