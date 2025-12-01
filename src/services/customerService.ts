@@ -340,6 +340,10 @@ export async function issueVoucherForF1(params: {
 
     if (!data.success) {
       console.error('❌ Voucher issue failed:', data);
+      // v7: Log detailed error if available
+      if (data.error_details) {
+        console.error('❌ Error details:', JSON.stringify(data.error_details, null, 2));
+      }
       return {
         success: false,
         error: data.error || 'Không thể phát voucher',

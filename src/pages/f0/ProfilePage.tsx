@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { TIER_LOGOS, TIER_CONFIGS } from '@/lib/constants';
 import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -74,7 +75,8 @@ const getDefaultUserData = (f0User: F0User | null) => ({
   branch: f0User?.bank_branch || '',
   bankVerified: f0User?.bank_verified || false,
   bankVerifiedAt: f0User?.bank_verified_at || '',
-  currentTier: 'silver', // Default tier
+  currentTier: 'bronze', // Default tier - will be fetched from API
+  currentTierName: 'Đồng', // Default tier name
   twoFactorEnabled: false,
 });
 
@@ -109,6 +111,7 @@ const ProfilePage = () => {
   const [userData, setUserData] = useState(getDefaultUserData(null));
   const [isLoading, setIsLoading] = useState(true);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [tierLoading, setTierLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load user data from storage and fetch latest from database
@@ -159,6 +162,48 @@ const ProfilePage = () => {
 
     loadUserData();
   }, [navigate]);
+
+  // Fetch tier info from dashboard stats API
+  useEffect(() => {
+    const fetchTierInfo = async () => {
+      if (!f0User?.id) return;
+
+      setTierLoading(true);
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-f0-dashboard-stats`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({ f0_id: f0User.id }),
+          }
+        );
+
+        const result = await response.json();
+
+        // Support both old format (result.tier) and new format (result.data.tier)
+        const tierData = result.data?.tier || result.tier;
+        if (result.success && tierData) {
+          setUserData(prev => ({
+            ...prev,
+            currentTier: tierData.current,
+            currentTierName: tierData.currentName,
+          }));
+        }
+      } catch (error) {
+        console.error('Error fetching tier info:', error);
+        // Keep default tier on error
+      } finally {
+        setTierLoading(false);
+      }
+    };
+
+    fetchTierInfo();
+  }, [f0User?.id]);
+
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -601,8 +646,10 @@ const ProfilePage = () => {
   };
 
   // Get tier badge variant
-  const getTierVariant = (tier: string) => {
+  const getTierVariant = (tier: string): 'default' | 'warning' | 'info' | 'success' | 'danger' => {
     switch (tier) {
+      case 'bronze':
+        return 'default';
       case 'silver':
         return 'default';
       case 'gold':
@@ -614,18 +661,10 @@ const ProfilePage = () => {
     }
   };
 
-  // Get tier display name
-  const getTierName = (tier: string) => {
-    switch (tier) {
-      case 'silver':
-        return 'Bạc';
-      case 'gold':
-        return 'Vàng';
-      case 'diamond':
-        return 'Kim Cương';
-      default:
-        return tier;
-    }
+  // Get tier display name - use from API or fallback to constants
+  const getTierDisplayName = (tier: string, tierName?: string) => {
+    if (tierName) return tierName;
+    return TIER_CONFIGS[tier]?.displayName || tier;
   };
 
   // Show loading while fetching user data
@@ -1080,13 +1119,32 @@ const ProfilePage = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-4">
-                    <div className="bg-primary-50 p-4 rounded-lg">
-                      <Shield className="w-8 h-8 text-primary-600" />
+                    {/* Tier Logo */}
+                    <div className="relative">
+                      {tierLoading ? (
+                        <div className="w-16 h-16 rounded-lg bg-gray-100 flex items-center justify-center">
+                          <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
+                        </div>
+                      ) : (
+                        <img
+                          src={TIER_LOGOS[userData.currentTier] || TIER_LOGOS.bronze}
+                          alt={`Hạng ${getTierDisplayName(userData.currentTier, userData.currentTierName)}`}
+                          className="w-16 h-16 object-contain"
+                          onError={(e) => {
+                            // Fallback to Shield icon if image fails to load
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
+                      )}
+                      <div className="hidden bg-primary-50 p-4 rounded-lg">
+                        <Shield className="w-8 h-8 text-primary-600" />
+                      </div>
                     </div>
                     <div>
                       <p className="text-sm text-gray-600 mb-1">Hạng hiện tại</p>
                       <Badge variant={getTierVariant(userData.currentTier)} className="text-base px-3 py-1">
-                        {getTierName(userData.currentTier)}
+                        {tierLoading ? 'Đang tải...' : getTierDisplayName(userData.currentTier, userData.currentTierName)}
                       </Badge>
                     </div>
                   </div>

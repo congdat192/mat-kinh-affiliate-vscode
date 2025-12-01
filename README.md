@@ -156,6 +156,41 @@ VITE_SUPABASE_URL=your_supabase_url
 | is_read | BOOLEAN | Read status |
 | created_at | TIMESTAMPTZ | Created date |
 
+#### Table: `commission_settings`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| name | VARCHAR(255) | Setting name |
+| config | JSONB | Rate config (type, value, max_commission, min_order_value) |
+| conditions | JSONB | Application conditions (applies_to: 'all' or 'first_order') |
+| is_active | BOOLEAN | Active status |
+| priority | INT | Priority order |
+
+#### Table: `f0_tiers`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| tier_code | VARCHAR(20) | BRONZE, SILVER, GOLD, DIAMOND |
+| tier_name | VARCHAR(50) | Display name (Đồng, Bạc, Vàng, Kim Cương) |
+| tier_level | INT | Level order (1-4) |
+| requirements | JSONB | min_referrals, min_revenue, min_orders |
+| benefits | JSONB | commission_bonus_percent, priority_support, etc. |
+
+#### Table: `commission_records`
+| Column | Type | Description |
+|--------|------|-------------|
+| id | UUID | Primary key |
+| voucher_code | VARCHAR(50) | FK to voucher_affiliate_tracking |
+| f0_id | UUID | FK to f0_partners |
+| invoice_id/code/amount | - | Invoice snapshot |
+| f1_phone/name | - | F1 customer snapshot |
+| basic_* | - | Basic commission snapshot |
+| first_order_* | - | First order commission snapshot |
+| tier_* | - | Tier bonus snapshot |
+| total_commission | DECIMAL | Total commission amount |
+| status | VARCHAR(20) | available/processing/paid/cancelled |
+| withdrawal_request_id | UUID | FK when withdrawn |
+
 ### Schema: `api`
 Views exposing `affiliate` tables for API access:
 - `api.f0_partners` → view of `affiliate.f0_partners`

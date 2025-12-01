@@ -1,0 +1,326 @@
+# Supabase Edge Functions Configuration
+# Generated: 2025-11-30
+# Project: kcirpjxbjqagrqrjfldu
+#
+# This file manages JWT verification settings for all Edge Functions
+# IMPORTANT: After editing this file, deploy functions using:
+#   npx supabase functions deploy <function-name>
+#
+# The verify_jwt setting in this file will be used automatically
+
+# ============================================================
+# AFFILIATE SYSTEM FUNCTIONS
+# ============================================================
+
+[functions.send-otp-affiliate]
+verify_jwt = false
+
+[functions.verify-otp-affiliate]
+verify_jwt = false
+
+[functions.login-affiliate]
+verify_jwt = false
+
+[functions.forgot-password-affiliate]
+verify_jwt = false
+
+[functions.reset-password-affiliate]
+verify_jwt = false
+
+[functions.send-affiliate-registration-email]
+verify_jwt = false
+
+[functions.send-affiliate-approval-email]
+verify_jwt = false
+
+[functions.create-referral-link]
+verify_jwt = false
+
+[functions.send-otp-bank-verification]
+verify_jwt = false
+
+[functions.verify-otp-bank]
+verify_jwt = false
+
+[functions.get-f0-dashboard-stats]
+verify_jwt = false
+
+[functions.get-f0-referral-history]
+verify_jwt = false
+
+[functions.manage-withdrawal-request]
+verify_jwt = false
+
+[functions.manage-notifications]
+verify_jwt = false
+
+[functions.webhook-affiliate-check-voucher-invoice]
+verify_jwt = false
+
+[functions.sync-invoice-commission]
+verify_jwt = false
+
+[functions.create-and-release-voucher-affiliate-internal]
+verify_jwt = false
+
+# ============================================================
+# VOUCHER SYSTEM FUNCTIONS
+# ============================================================
+
+[functions.claim-voucher]
+verify_jwt = false
+
+[functions.check-voucher-eligibility]
+verify_jwt = false
+
+[functions.activate-voucher]
+verify_jwt = false
+
+[functions.voucher-history-customer]
+verify_jwt = false
+
+[functions.voucher-popup-terms]
+verify_jwt = false
+
+[functions.list-voucher-tracking]
+verify_jwt = false
+
+[functions.reissue-voucher]
+verify_jwt = false
+
+[functions.create-and-release-voucher]
+verify_jwt = false
+
+[functions.list-voucher-campaigns-kiotviet]
+verify_jwt = false
+
+[functions.sync-list-voucher-campaigns-kiotviet]
+verify_jwt = false
+
+# Internal voucher functions
+[functions.claim-voucher-internal]
+verify_jwt = false
+
+[functions.check-voucher-eligibility-internal]
+verify_jwt = false
+
+[functions.voucher-history-internal]
+verify_jwt = false
+
+[functions.create-and-release-voucher-internal]
+verify_jwt = false
+
+[functions.reissue-voucher-internal]
+verify_jwt = false
+
+# ============================================================
+# WEBHOOK FUNCTIONS (All must be verify_jwt = false)
+# ============================================================
+
+[functions.kiotviet-webhook-customers]
+verify_jwt = false
+
+[functions.kiotviet-webhook-invoices]
+verify_jwt = false
+
+[functions.webhook-check-voucher-invoice]
+verify_jwt = false
+
+[functions.kiotviet-webhook-check-field-khachhang]
+verify_jwt = false
+
+[functions.webhook_customers_backup_kiotviet]
+verify_jwt = false
+
+[functions.webhook_invoices_backup_kiotviet]
+verify_jwt = false
+
+[functions.vihat-otp-webhook]
+verify_jwt = false
+
+[functions.hyper-processor]
+verify_jwt = false
+
+# ============================================================
+# CUSTOMER FUNCTIONS
+# ============================================================
+
+[functions.customer-by-phone]
+verify_jwt = false
+
+[functions.customer-family-members]
+verify_jwt = false
+
+[functions.customer-family-members-internal]
+verify_jwt = false
+
+[functions.check-type-customer]
+verify_jwt = false
+
+[functions.invoices-history-customer]
+verify_jwt = false
+
+# ============================================================
+# OTP & AUTH FUNCTIONS
+# ============================================================
+
+[functions.send_otp_login_vihat]
+verify_jwt = false
+
+[functions.verify_otp_login_vihat]
+verify_jwt = false
+
+[functions.send_otp_login_sms_vihat]
+verify_jwt = false
+
+[functions.send-employee-otp]
+verify_jwt = false
+
+[functions.verify-employee-otp]
+verify_jwt = false
+
+# ============================================================
+# KIOTVIET INTEGRATION FUNCTIONS
+# ============================================================
+
+[functions.refresh-kiotviet-token]
+verify_jwt = false
+
+[functions.save-kiotviet-token]
+verify_jwt = false
+
+[functions.sync-productid-kiotviet]
+verify_jwt = false
+
+[functions.sync_avatars_kiotviet]
+verify_jwt = false
+
+[functions.sync-product-barcodes]
+verify_jwt = false
+
+[functions.load_hoadon_totalpayment]
+verify_jwt = false
+
+[functions.load_hoadon_totalpayment_daily]
+verify_jwt = false
+
+[functions.update_hoadon_totalpayment_daily]
+verify_jwt = false
+
+[functions.load_customers_modifieddate_daily]
+verify_jwt = false
+
+[functions.update_customers_modifieddate_daily]
+verify_jwt = false
+
+[functions.copy_all_customers_update_customers_modifieddate]
+verify_jwt = false
+
+[functions.load_danhsach_phieutrahang_apikiotviet]
+verify_jwt = false
+
+[functions.sync_danhsach_phieutrahang_apikiotviet]
+verify_jwt = false
+
+[functions.load_danhsach_phieutrahang_kiotviet_daily]
+verify_jwt = false
+
+[functions.load_update_new_customers_monthly_kiotviet]
+verify_jwt = false
+
+[functions.syn_phieutrahang_with_invoice]
+verify_jwt = false
+
+[functions.sync_update_delete_hoadon_kiotviet_mktd_updatedaily]
+verify_jwt = false
+
+[functions.load_update_KH_modifieddate_table_customers_backup]
+verify_jwt = false
+
+[functions.sync_customers_modifieddate_daily_final]
+verify_jwt = false
+
+[functions.load_customers_modifieddate_daily_final_ngay_cu_the]
+verify_jwt = false
+
+# ============================================================
+# ZNS & SMS FUNCTIONS
+# ============================================================
+
+[functions.send-zns-vihat]
+verify_jwt = false
+
+[functions.zns_hoadon_vihat]
+verify_jwt = false
+
+[functions.update-zns-data]
+verify_jwt = false
+
+[functions.sms_sinhnhat_daily]
+verify_jwt = false
+
+[functions.send_sms_sinhnhat_daily]
+verify_jwt = false
+
+[functions.cleanup-zns-returned-invoices]
+verify_jwt = false
+
+# ============================================================
+# REPORT & UTILITY FUNCTIONS
+# ============================================================
+
+[functions.report_newcustomers_daily]
+verify_jwt = false
+
+[functions.hoahong-cskh]
+verify_jwt = false
+
+[functions.api-gateway]
+verify_jwt = false
+
+[functions.get-token-supabase]
+verify_jwt = false
+
+[functions.refresh-token-supabase]
+verify_jwt = false
+
+# ============================================================
+# USER MANAGEMENT FUNCTIONS
+# ============================================================
+
+[functions.create-user-account]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.send-new-user-credentials]
+verify_jwt = false
+
+# ============================================================
+# CREDENTIAL MANAGEMENT FUNCTIONS
+# ============================================================
+
+[functions.save-vihat-credentials]
+verify_jwt = false
+
+[functions.save-resend-credentials]
+verify_jwt = false
+
+# ============================================================
+# YEAR-SPECIFIC FUNCTIONS (2018-2025)
+# Note: These functions have numeric names that are not valid
+# for config.toml. They must be managed via Dashboard.
+# ============================================================
+
+# Functions: 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025
+# -> Manage JWT via Supabase Dashboard manually
+
+# ============================================================
+# OTHER FUNCTIONS
+# ============================================================
+
+[functions.activate-vouchers-theo-dieu-kien]
+verify_jwt = false
+
+# Note: Vietnam-timezone and otp-backup-chuan have verify_jwt = true (backup/reference only)
