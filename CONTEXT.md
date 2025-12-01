@@ -168,7 +168,8 @@ Tables synced from KiotViet POS via webhook:
 |----------|---------|-------------|
 | `create-referral-link` | v3 | Creates referral link with realtime conversion count |
 | `create-and-release-voucher-affiliate-internal` | v9 | Issues voucher for F1 customer claim |
-| `webhook-affiliate-check-voucher-invoice` | v8 | Handles KiotViet invoice webhook for commission calculation |
+| `webhook-affiliate-check-voucher-invoice` | v9 | Handles KiotViet invoice webhook for commission calculation |
+| `cron-affiliate-commission-sync` | v1 | Backup cron job for missed webhooks (runs every 15 min) |
 
 ### Auth Functions
 | Function | Description |
@@ -228,3 +229,8 @@ F0 requests withdrawal → commission_status: paid
 - **ReferCustomerPage.tsx**: Removed mock data, now loads real referrals from database
 - **campaignService.ts**: Added `getRecentReferrals()` method
 - **webhook-affiliate-check-voucher-invoice v8**: Fixed type mismatch bug comparing `invoice_id` (string vs number)
+- **webhook-affiliate-check-voucher-invoice v9**: Added `recalculateF0Tier()` function for auto tier upgrade
+- **api.commission_records VIEW**: Added `invoice_cancelled_at` column
+- **Cron Backup System**: Added VIEW `vouchers_need_commission_check` + Edge Function `cron-affiliate-commission-sync` + pg_cron job (every 15 min)
+- **get-f0-dashboard-stats v15**: Fixed F1 stats calculation - now uses `commission_records` instead of querying `kiotviet.invoices` (cross-schema query was failing silently)
+- **Supabase CLI**: Installed as dev dependency (v2.64.1), updated CLAUDE.md with deployment rules (MCP cannot disable JWT)

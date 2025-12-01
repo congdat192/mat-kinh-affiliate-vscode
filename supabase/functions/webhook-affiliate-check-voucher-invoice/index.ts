@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-console.info('Webhook affiliate check voucher invoice started - v8 (Fix partial payment re-check comparison)');
+console.info('Webhook affiliate check voucher invoice started - v9 (Auto recalculate F0 tier after commission)');
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -38,6 +38,133 @@ function normalizePhone(phone: string) {
   }
   return normalized;
 }
+// ============================================
+// RECALCULATE F0 TIER
+// ============================================
+async function recalculateF0Tier(supabase: any, f0Id: string, f0Code: string) {
+  console.log(`[Tier] 🔄 Recalculating tier for F0: ${f0Code}`);
+
+  try {
+    // Step 1: Get all tiers ordered by level (highest first)
+    const { data: tiers, error: tiersError } = await supabase
+      .from('f0_tiers')
+      .select('*')
+      .eq('is_active', true)
+      .order('tier_level', { ascending: false });
+
+    if (tiersError || !tiers || tiers.length === 0) {
+      console.error('[Tier] ❌ Error fetching tiers:', tiersError?.message);
+      return null;
+    }
+
+    // Step 2: Calculate F0's current stats from commission_records
+    // Only count commissions that are valid (available or paid)
+    const { data: stats, error: statsError } = await supabase
+      .from('commission_records')
+      .select('id, invoice_amount, f1_customer_id')
+      .eq('f0_id', f0Id)
+      .in('status', ['available', 'paid'])
+      .is('invoice_cancelled_at', null);
+
+    if (statsError) {
+      console.error('[Tier] ❌ Error fetching commission stats:', statsError.message);
+      return null;
+    }
+
+    // Calculate metrics
+    const totalOrders = stats?.length || 0;
+    const totalRevenue = stats?.reduce((sum: number, r: any) => sum + Number(r.invoice_amount || 0), 0) || 0;
+    // Count unique F1 customers
+    const uniqueF1s = new Set(stats?.map((r: any) => r.f1_customer_id).filter(Boolean));
+    const totalReferrals = uniqueF1s.size;
+
+    console.log(`[Tier] 📊 F0 Stats:`);
+    console.log(`[Tier]    Total Orders: ${totalOrders}`);
+    console.log(`[Tier]    Total Revenue: ${totalRevenue.toLocaleString()}đ`);
+    console.log(`[Tier]    Total Referrals (unique F1): ${totalReferrals}`);
+
+    // Step 3: Determine new tier (highest tier that meets all requirements)
+    let newTier = tiers[tiers.length - 1]; // Default to lowest tier (BRONZE)
+
+    for (const tier of tiers) {
+      const req = tier.requirements || {};
+      const minReferrals = req.min_referrals || 0;
+      const minRevenue = req.min_revenue || 0;
+      const minOrders = req.min_orders || 0;
+
+      const meetsReferrals = totalReferrals >= minReferrals;
+      const meetsRevenue = totalRevenue >= minRevenue;
+      const meetsOrders = totalOrders >= minOrders;
+
+      console.log(`[Tier] Checking ${tier.tier_code}: referrals(${totalReferrals}>=${minReferrals}:${meetsReferrals}), revenue(${totalRevenue}>=${minRevenue}:${meetsRevenue}), orders(${totalOrders}>=${minOrders}:${meetsOrders})`);
+
+      if (meetsReferrals && meetsRevenue && meetsOrders) {
+        newTier = tier;
+        console.log(`[Tier] ✅ Qualifies for ${tier.tier_code}!`);
+        break; // Found highest qualifying tier
+      }
+    }
+
+    // Step 4: Get current tier
+    const { data: f0Partner, error: f0Error } = await supabase
+      .from('f0_partners')
+      .select('current_tier')
+      .eq('id', f0Id)
+      .single();
+
+    if (f0Error) {
+      console.error('[Tier] ❌ Error fetching F0 partner:', f0Error.message);
+      return null;
+    }
+
+    const currentTier = f0Partner?.current_tier || 'BRONZE';
+
+    // Step 5: Update if tier changed
+    if (currentTier !== newTier.tier_code) {
+      console.log(`[Tier] 🎉 TIER UPGRADE: ${currentTier} → ${newTier.tier_code}`);
+
+      const { error: updateError } = await supabase
+        .from('f0_partners')
+        .update({
+          current_tier: newTier.tier_code,
+          updated_at: getVietnamTime().toISOString()
+        })
+        .eq('id', f0Id);
+
+      if (updateError) {
+        console.error('[Tier] ❌ Error updating tier:', updateError.message);
+        return null;
+      }
+
+      // Create notification for tier upgrade
+      if (newTier.tier_level > (tiers.find((t: any) => t.tier_code === currentTier)?.tier_level || 1)) {
+        await supabase.from('notifications').insert({
+          f0_id: f0Id,
+          type: 'system',
+          content: {
+            title: '🎉 Chúc mừng! Bạn đã lên hạng!',
+            message: `Bạn đã đạt thứ hạng ${newTier.tier_name} (${newTier.tier_code})! Hưởng thêm ${newTier.benefits?.commission_bonus_percent || 0}% bonus hoa hồng.`,
+            old_tier: currentTier,
+            new_tier: newTier.tier_code,
+            new_tier_name: newTier.tier_name,
+            bonus_percent: newTier.benefits?.commission_bonus_percent || 0
+          },
+          is_read: false
+        });
+        console.log('[Tier] ✅ Tier upgrade notification sent!');
+      }
+
+      return { upgraded: true, oldTier: currentTier, newTier: newTier.tier_code };
+    } else {
+      console.log(`[Tier] ℹ️ Tier unchanged: ${currentTier}`);
+      return { upgraded: false, currentTier };
+    }
+  } catch (error: any) {
+    console.error('[Tier] ❌ Error in recalculateF0Tier:', error.message);
+    return null;
+  }
+}
+
 // ============================================
 // HANDLE INVOICE CANCELLATION
 // ============================================
@@ -661,10 +788,21 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     is_read: false
   });
   console.log('[Lifetime] ✅ Notification created for F0!');
+
+  // ============================================
+  // RECALCULATE F0 TIER AFTER LIFETIME COMMISSION
+  // ============================================
+  console.log('[Lifetime] 📊 Recalculating F0 tier...');
+  const tierResult = await recalculateF0Tier(supabase, assignment.f0_id, assignment.f0_code);
+  if (tierResult?.upgraded) {
+    console.log(`[Lifetime] 🎉 F0 tier upgraded: ${tierResult.oldTier} → ${tierResult.newTier}`);
+  }
+
   return {
     assignment,
     commission,
-    commissionRecordId: newCommission.id
+    commissionRecordId: newCommission.id,
+    tierResult
   };
 }
 // ============================================
@@ -1101,6 +1239,15 @@ Deno.serve(async (req) => {
           // ============================================
           console.log('[Affiliate] 🔗 Creating F1 assignment for lifetime commission...');
           await createF1Assignment(supabase, contactNumber, invoiceDetail.customerCode, customerName, affiliateVoucher.f0_id, affiliateVoucher.f0_code, affiliateVoucher.code, invoiceDetail.code, convertToVietnamTZ(invoiceDetail.createdDate));
+
+          // ============================================
+          // RECALCULATE F0 TIER AFTER COMMISSION CREATED
+          // ============================================
+          console.log('[Affiliate] 📊 Recalculating F0 tier...');
+          const tierResult = await recalculateF0Tier(supabase, affiliateVoucher.f0_id, affiliateVoucher.f0_code);
+          if (tierResult?.upgraded) {
+            console.log(`[Affiliate] 🎉 F0 tier upgraded: ${tierResult.oldTier} → ${tierResult.newTier}`);
+          }
         }
         // Step 11: Create notification for F0
         console.log('[Affiliate] 🔔 Creating notification for F0...');

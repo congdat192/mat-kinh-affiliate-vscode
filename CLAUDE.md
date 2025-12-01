@@ -56,24 +56,52 @@ Load the specific skill from the `.claude-skills/` directory based on the user's
 ## 5. SUPABASE DEPLOYMENT PROTOCOLS (GENERIC)
 
 ### A. The "Anti-Lockout" Rule (Tooling)
-> **WARNING:** The internal MCP tool `deploy_edge_function` is **BANNED** because it resets `verify_jwt` to `true`.
-> **ACTION:** ALWAYS use the `npx supabase functions deploy` command.
+> **CRITICAL WARNING:**
+> - The MCP tool `mcp__supabase__deploy_edge_function` **CANNOT disable JWT verification**.
+> - MCP always deploys with `verify_jwt = true` regardless of config.toml settings.
+> - **ACTION:** ALWAYS use Supabase CLI (`npx supabase functions deploy`) for deploying Edge Functions.
 
-### B. Deployment Strategy
+### B. Supabase CLI Installation
+The project has Supabase CLI installed as dev dependency:
+```bash
+# Check version
+npx supabase --version  # v2.64.1
+
+# Link project (first time)
+npx supabase link --project-ref kcirpjxbjqagrqrjfldu
+```
+
+### C. Deployment Strategy
 1.  **Check Project Rules:** Before deploying, read `supabase/DEPLOYMENT.md` (if exists) or `supabase/config.toml` to know which functions require `verify_jwt=false`.
 2.  **CLI Constraints:**
     - Supabase CLI does NOT support function names starting with numbers (e.g., `2024-report`). These must be managed via Dashboard.
     - Always verify the Project ID matches the active environment.
+3.  **JWT Verification:**
+    - Most functions need `--no-verify-jwt` for public access (webhooks, auth, cron jobs).
+    - Check `supabase/config.toml` for the correct setting per function.
 
-### C. Standard Commands
+### D. Standard Commands
 ```bash
-# Default deploy (respects config.toml)
-npx supabase functions deploy <function_name>
-
-# Force PUBLIC access (Use for Webhooks/Auth)
+# Deploy with JWT disabled (RECOMMENDED for most functions)
 npx supabase functions deploy <function_name> --no-verify-jwt
+
+# Deploy with JWT enabled (rare - only for protected endpoints)
+npx supabase functions deploy <function_name>
 
 # List all functions
 npx supabase functions list
+
+# View function logs
+npx supabase functions logs <function_name>
 ```
+
+### E. When to Use CLI vs MCP
+| Action | Tool | Reason |
+|--------|------|--------|
+| Deploy new function | CLI | MCP cannot disable JWT |
+| Update existing function | CLI | MCP cannot disable JWT |
+| Query database | MCP | `mcp__supabase__execute_sql` works fine |
+| Apply migrations | MCP | `mcp__supabase__apply_migration` works fine |
+| Read function code | MCP | `mcp__supabase__get_edge_function` works fine |
+| List functions | MCP | `mcp__supabase__list_edge_functions` works fine |
 

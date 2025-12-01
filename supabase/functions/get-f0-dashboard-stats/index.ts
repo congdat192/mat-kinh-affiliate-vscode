@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-console.info('get-f0-dashboard-stats v14 - Include adjustments tracking for cancelled invoices');
+console.info('get-f0-dashboard-stats v15 - Fix: Calculate F1 stats from commission_records instead of kiotviet.invoices');
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -38,11 +38,7 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false }
     });
 
-    // Separate client for kiotviet schema
-    const supabaseKiotviet = createClient(supabaseUrl!, supabaseServiceKey!, {
-      db: { schema: 'kiotviet' },
-      auth: { autoRefreshToken: false, persistSession: false }
-    });
+    // NOTE: Removed kiotviet schema client - now using commission_records for F1 stats
 
     // Run queries in parallel for better performance
     const [
@@ -66,9 +62,9 @@ Deno.serve(async (req) => {
         .eq('f0_id', f0_id)
         .order('created_at', { ascending: false }),
 
-      // 3. Get commission stats from commission_records (exclude cancelled invoices for active stats)
+      // 3. Get commission stats from commission_records (include invoice_amount and f1_customer_id for F1 stats)
       supabase.from('commission_records')
-        .select('id, total_commission, status, basic_amount, first_order_amount, tier_bonus_amount, invoice_cancelled_at, invoice_cancelled_after_paid')
+        .select('id, total_commission, status, basic_amount, first_order_amount, tier_bonus_amount, invoice_cancelled_at, invoice_cancelled_after_paid, invoice_amount, f1_customer_id')
         .eq('f0_id', f0_id),
 
       // 4. Get withdrawal stats
@@ -152,54 +148,35 @@ Deno.serve(async (req) => {
     const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
     const totalReferralsThisQuarter = vouchers.filter(v => new Date(v.created_at) >= quarterStart).length;
 
-    // Get invoice codes from vouchers that have invoices
-    const vouchersWithInvoices = vouchers.filter(v => v.invoice_code);
-    const invoiceCodes = vouchersWithInvoices.map(v => v.invoice_code);
+    // ========================================
+    // v15: Calculate F1 stats from commission_records (not kiotviet.invoices)
+    // This is more reliable because commission_records are only created when invoice is fully paid
+    // ========================================
 
-    let totalF1Revenue = 0;
-    let qualifiedF1Count = 0;
-    let fullyPaidInvoiceCount = 0;
-    let partialPaidInvoiceCount = 0;
-    const qualifiedVoucherCodes = new Set<string>();
+    // Filter valid commissions (available or paid, not cancelled)
+    const validCommissions = commissions.filter(c =>
+      (c.status === 'available' || c.status === 'paid') &&
+      !c.invoice_cancelled_at
+    );
 
-    if (invoiceCodes.length > 0) {
-      const { data: invoices, error: invoicesError } = await supabaseKiotviet
-        .from('invoices')
-        .select('code, total, totalpayment, statusvalue')
-        .in('code', invoiceCodes);
+    // Calculate total F1 revenue from valid commissions
+    const totalF1Revenue = validCommissions.reduce((sum, c) => sum + (Number(c.invoice_amount) || 0), 0);
 
-      if (invoicesError) {
-        console.error('Error fetching invoices:', invoicesError);
-      } else if (invoices) {
-        const invoiceMap = new Map(invoices.map(i => [i.code, i]));
+    // Count unique F1 customers from valid commissions
+    const uniqueF1Customers = new Set(validCommissions.map(c => c.f1_customer_id).filter(Boolean));
+    const qualifiedF1Count = uniqueF1Customers.size;
 
-        for (const voucher of vouchersWithInvoices) {
-          const invoice = invoiceMap.get(voucher.invoice_code);
-          if (invoice) {
-            const total = Number(invoice.total) || 0;
-            const totalPayment = Number(invoice.totalpayment) || 0;
+    // Invoice counts
+    const fullyPaidInvoiceCount = validCommissions.length;
+    const partialPaidInvoiceCount = vouchers.filter(v =>
+      v.invoice_code &&
+      !validCommissions.some(c => c.f1_customer_id) // Has invoice but no valid commission
+    ).length;
 
-            // v14: Also check if invoice was cancelled
-            // Find if this voucher's commission was cancelled due to invoice cancellation
-            const relatedCommission = commissions.find(c =>
-              c.invoice_cancelled_at &&
-              vouchers.some(v => v.code === voucher.code)
-            );
-
-            // Only count if FULLY PAID and NOT cancelled
-            if (total > 0 && total === totalPayment && invoice.statusvalue === 'Hoàn thành' && !relatedCommission?.invoice_cancelled_at) {
-              totalF1Revenue += total;
-              fullyPaidInvoiceCount++;
-              qualifiedVoucherCodes.add(voucher.code);
-            } else if (totalPayment > 0 && totalPayment < total) {
-              partialPaidInvoiceCount++;
-            }
-          }
-        }
-
-        qualifiedF1Count = qualifiedVoucherCodes.size;
-      }
-    }
+    console.log(`=== F1 STATS (v15 from commission_records) ===`);
+    console.log(`Valid commissions: ${validCommissions.length}`);
+    console.log(`Total F1 Revenue: ${totalF1Revenue}`);
+    console.log(`Unique F1 Customers: ${qualifiedF1Count}`);
 
     // v14: Apply F1 adjustment from cancelled invoices
     const adjustedF1Count = Math.max(0, qualifiedF1Count + totalF1Adjustment);

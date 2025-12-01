@@ -36,6 +36,9 @@ The following functions MUST have `verify_jwt=false` (Public Access):
 - `manage-withdrawal-request`
 - `manage-notifications`
 
+### Cron Jobs
+- `cron-affiliate-commission-sync` - Backup sync for missed webhooks (runs every 15 min via pg_cron)
+
 ### Internal Functions (All)
 - All functions ending with `-internal`
 - Examples: `claim-voucher-internal`, `check-voucher-eligibility-internal`

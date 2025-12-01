@@ -57,6 +57,9 @@ verify_jwt = false
 [functions.webhook-affiliate-check-voucher-invoice]
 verify_jwt = false
 
+[functions.cron-affiliate-commission-sync]
+verify_jwt = false
+
 [functions.sync-invoice-commission]
 verify_jwt = false
 
