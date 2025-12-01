@@ -390,14 +390,27 @@ class AffiliateCampaignService {
   /**
    * Get all referral links created by F0 (flattened from JSONB)
    * Returns array of ReferralLink for backward compatibility with UI
+   *
+   * IMPORTANT: conversion_count is calculated REALTIME from voucher_affiliate_tracking
+   * to ensure data consistency (not stored in JSONB anymore)
    */
   async getReferralLinksByF0(f0Code: string): Promise<ReferralLink[]> {
     try {
-      const { data: record, error } = await supabase
-        .from('referral_links')
-        .select('*')
-        .eq('f0_code', f0Code)
-        .single();
+      // Query referral_links and voucher counts in parallel
+      const [linksResult, voucherCountsResult] = await Promise.all([
+        supabase
+          .from('referral_links')
+          .select('*')
+          .eq('f0_code', f0Code)
+          .single(),
+        // Get conversion counts per campaign from voucher_affiliate_tracking
+        supabase
+          .from('voucher_affiliate_tracking')
+          .select('campaign_code')
+          .eq('f0_code', f0Code)
+      ]);
+
+      const { data: record, error } = linksResult;
 
       if (error) {
         // No record found is not an error
@@ -412,6 +425,15 @@ class AffiliateCampaignService {
         return [];
       }
 
+      // Calculate conversion counts from voucher_affiliate_tracking
+      const conversionCounts = new Map<string, number>();
+      if (voucherCountsResult.data) {
+        for (const voucher of voucherCountsResult.data) {
+          const code = voucher.campaign_code;
+          conversionCounts.set(code, (conversionCounts.get(code) || 0) + 1);
+        }
+      }
+
       // Flatten JSONB array to ReferralLink array for UI
       const campaigns: CampaignLinkItem[] = record.campaigns;
       return campaigns.map(c => ({
@@ -423,7 +445,8 @@ class AffiliateCampaignService {
         campaign_name: c.campaign_name,
         full_url: this.generateReferralLink(f0Code, c.campaign_code),
         click_count: c.click_count || 0,
-        conversion_count: c.conversion_count || 0,
+        // REALTIME: Get conversion_count from voucher_affiliate_tracking, not JSONB
+        conversion_count: conversionCounts.get(c.campaign_code) || 0,
         is_active: c.is_active,
         created_at: c.created_at,
         updated_at: record.updated_at,

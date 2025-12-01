@@ -29,54 +29,16 @@ import { authService } from '@/services/authService';
 import { campaignService } from '@/services/campaignService';
 import type { Campaign } from '@/types/campaign';
 
-// Mock data for recent referrals
-const mockRecentReferrals = [
-  {
-    id: 1,
-    name: 'Nguyễn Văn A',
-    phone: '0901234567',
-    email: 'nguyenvana@email.com',
-    date: '2025-11-16',
-    status: 'sent',
-    voucherCode: 'VOUCHER001',
-  },
-  {
-    id: 2,
-    name: 'Trần Thị B',
-    phone: '0912345678',
-    email: 'tranthib@email.com',
-    date: '2025-11-15',
-    status: 'used',
-    voucherCode: 'VOUCHER002',
-  },
-  {
-    id: 3,
-    name: 'Lê Văn C',
-    phone: '0923456789',
-    email: '',
-    date: '2025-11-14',
-    status: 'sent',
-    voucherCode: 'VOUCHER003',
-  },
-  {
-    id: 4,
-    name: 'Phạm Thị D',
-    phone: '0934567890',
-    email: 'phamthid@email.com',
-    date: '2025-11-13',
-    status: 'used',
-    voucherCode: 'VOUCHER004',
-  },
-  {
-    id: 5,
-    name: 'Hoàng Văn E',
-    phone: '0945678901',
-    email: '',
-    date: '2025-11-12',
-    status: 'sent',
-    voucherCode: 'VOUCHER005',
-  },
-];
+// Interface for recent referrals
+interface RecentReferral {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  date: string;
+  status: string;
+  voucherCode: string;
+}
 
 const ReferCustomerPage = () => {
   // Current step (1 or 2)
@@ -104,9 +66,14 @@ const ReferCustomerPage = () => {
   const [isCheckingCustomer, setIsCheckingCustomer] = useState(false);
   const [customerCheckResult, setCustomerCheckResult] = useState<CheckCustomerResult | null>(null);
 
-  // Load campaigns for current F0 on mount
+  // Recent referrals state (loaded from API)
+  const [recentReferrals, setRecentReferrals] = useState<RecentReferral[]>([]);
+  const [isLoadingReferrals, setIsLoadingReferrals] = useState(false);
+
+  // Load campaigns and recent referrals on mount
   useEffect(() => {
     loadCampaigns();
+    loadRecentReferrals();
   }, []);
 
   const loadCampaigns = async () => {
@@ -120,6 +87,22 @@ const ReferCustomerPage = () => {
       toast.error('Lỗi khi tải danh sách chiến dịch. Vui lòng thử lại.');
     } finally {
       setIsLoadingCampaigns(false);
+    }
+  };
+
+  // Load recent referrals from voucher_affiliate_tracking
+  const loadRecentReferrals = async () => {
+    setIsLoadingReferrals(true);
+    try {
+      const f0Code = authService.getF0Code();
+      const referrals = await campaignService.getRecentReferrals(f0Code, 5);
+      setRecentReferrals(referrals);
+    } catch (error) {
+      console.error('Error loading recent referrals:', error);
+      // Don't show error toast - just show empty list
+      setRecentReferrals([]);
+    } finally {
+      setIsLoadingReferrals(false);
     }
   };
 
@@ -813,40 +796,53 @@ const ReferCustomerPage = () => {
             <CardDescription>5 khách hàng mới nhất bạn đã giới thiệu</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {mockRecentReferrals.map((referral) => (
-                <div
-                  key={referral.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center gap-4 flex-1">
-                    <div className="bg-primary-100 rounded-full p-3">
-                      <UserPlus className="w-5 h-5 text-primary-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-semibold text-gray-900">{referral.name}</p>
-                      <div className="flex items-center gap-3 mt-1">
-                        <p className="text-sm text-gray-600 flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          {referral.phone}
-                        </p>
-                        {referral.email && (
+            {isLoadingReferrals ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary-500" />
+                <span className="ml-2 text-gray-500">Đang tải...</span>
+              </div>
+            ) : recentReferrals.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <UserPlus className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>Bạn chưa giới thiệu khách hàng nào</p>
+                <p className="text-sm mt-1">Hãy bắt đầu giới thiệu để nhận hoa hồng!</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentReferrals.map((referral) => (
+                  <div
+                    key={referral.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="bg-primary-100 rounded-full p-3">
+                        <UserPlus className="w-5 h-5 text-primary-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900">{referral.name}</p>
+                        <div className="flex items-center gap-3 mt-1">
                           <p className="text-sm text-gray-600 flex items-center gap-1">
-                            <Mail className="w-3 h-3" />
-                            {referral.email}
+                            <Phone className="w-3 h-3" />
+                            {referral.phone}
                           </p>
-                        )}
+                          {referral.email && (
+                            <p className="text-sm text-gray-600 flex items-center gap-1">
+                              <Mail className="w-3 h-3" />
+                              {referral.email}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <div className="text-right space-y-1">
+                      <p className="text-xs text-gray-500">{formatDate(referral.date)}</p>
+                      {getStatusBadge(referral.status)}
+                      <p className="text-xs text-gray-600 font-mono">{referral.voucherCode}</p>
+                    </div>
                   </div>
-                  <div className="text-right space-y-1">
-                    <p className="text-xs text-gray-500">{formatDate(referral.date)}</p>
-                    {getStatusBadge(referral.status)}
-                    <p className="text-xs text-gray-600 font-mono">{referral.voucherCode}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

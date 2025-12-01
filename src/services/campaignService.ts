@@ -8,6 +8,18 @@ import type {
   IssueVoucherRequest,
 } from '@/types/campaign';
 import { externalApiService } from './externalApiService';
+import { supabase } from '@/lib/supabase';
+
+// Interface for recent referral data
+export interface RecentReferral {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  date: string;
+  status: string;
+  voucherCode: string;
+}
 
 // Helper function to generate voucher code
 function generateVoucherCode(): string {
@@ -323,6 +335,45 @@ class CampaignService {
     voucher.status = 'used';
     voucher.used_at = new Date().toISOString();
     return true;
+  }
+
+  /**
+   * Get recent referrals for F0 from voucher_affiliate_tracking
+   * @param f0_code - F0 partner code
+   * @param limit - Max number of referrals to return (default 5)
+   */
+  async getRecentReferrals(f0_code: string, limit: number = 5): Promise<RecentReferral[]> {
+    try {
+      const { data, error } = await supabase
+        .from('voucher_affiliate_tracking')
+        .select('id, f1_phone, f1_name, voucher_code, status, claimed_at, used_at')
+        .eq('f0_code', f0_code)
+        .order('claimed_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        console.error('Error fetching recent referrals:', error);
+        return [];
+      }
+
+      if (!data || data.length === 0) {
+        return [];
+      }
+
+      // Map database records to RecentReferral interface
+      return data.map((record: any) => ({
+        id: record.id,
+        name: record.f1_name || 'Khách hàng',
+        phone: record.f1_phone || '',
+        email: '', // voucher_affiliate_tracking doesn't store email
+        date: record.claimed_at || new Date().toISOString(),
+        status: record.used_at ? 'used' : 'sent',
+        voucherCode: record.voucher_code || '',
+      }));
+    } catch (error) {
+      console.error('Error in getRecentReferrals:', error);
+      return [];
+    }
   }
 
   /**
