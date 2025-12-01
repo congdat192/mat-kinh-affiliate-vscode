@@ -21,6 +21,7 @@ import F0DashboardPage from '@/pages/f0/DashboardPage';
 import CreateReferralLinkPage from '@/pages/f0/CreateReferralLinkPage';
 import ReferCustomerPage from '@/pages/f0/ReferCustomerPage';
 import ReferralHistoryPage from '@/pages/f0/ReferralHistoryPage';
+import MyCustomersPage from '@/pages/f0/MyCustomersPage';
 import F0WithdrawalPage from '@/pages/f0/WithdrawalPage';
 import ProfilePage from '@/pages/f0/ProfilePage';
 import NotificationsPage from '@/pages/f0/NotificationsPage';
@@ -48,6 +49,7 @@ function App() {
           <Route path="create-link" element={<CreateReferralLinkPage />} />
           <Route path="refer-customer" element={<ReferCustomerPage />} />
           <Route path="referral-history" element={<ReferralHistoryPage />} />
+          <Route path="my-customers" element={<MyCustomersPage />} />
           <Route path="withdrawal" element={<F0WithdrawalPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="notifications" element={<NotificationsPage />} />

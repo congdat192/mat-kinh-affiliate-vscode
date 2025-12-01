@@ -178,6 +178,12 @@ Tables synced from KiotViet POS via webhook:
 | `verify-otp-affiliate` | Verifies OTP and creates F0 account |
 | `login-affiliate` | F0 login with SHA-256 password verification |
 
+### F1 Customer Functions
+| Function | Description |
+|----------|-------------|
+| `get-f0-my-customers` | Gets F1 customers list for F0 with summary stats |
+| `get-f1-customer-detail` | Gets F1 customer detail with order history |
+
 ---
 
 ## 7. SERVICES LAYER
@@ -195,6 +201,12 @@ Tables synced from KiotViet POS via webhook:
 | `getAffiliateCampaigns(f0Code)` | Gets campaigns assigned to F0 with conversion counts |
 | `createReferralLink(f0Code, campaignId)` | Creates shareable referral link |
 | `claimVoucher(f1Phone, f1Name, refCode, campaignId)` | Claims voucher for F1 |
+
+### `f1CustomerService.ts`
+| Method | Description |
+|--------|-------------|
+| `getMyCustomers(f0_id, options)` | Gets list of F1 customers for F0 with pagination & search |
+| `getCustomerDetail(f0_id, f1_phone)` | Gets F1 customer detail with order history |
 
 ---
 
@@ -225,7 +237,22 @@ F0 requests withdrawal → commission_status: paid
 
 ## 9. RECENT FIXES
 
-### 2025-12-01
+### 2025-12-01 (Session 2)
+- **MyCustomersPage.tsx UI Redesign**: Complete rewrite with new CRM-style UI
+  - Compact summary bar (thay vì 4 cards riêng lẻ)
+  - Table với expandable rows (click để xem inline details)
+  - Lazy load orders khi expand row
+  - Removed separate CustomerDetailPage (inline display)
+- **MyCustomersPage.tsx Bug Fixes**:
+  - Fixed `order_type` display - API trả về Vietnamese (`"Đơn đầu tiên"` / `"Đơn quay lại"`), không phải English
+  - Fixed pagination always show count (không chỉ khi > 1 page)
+- **VIEW Permissions Fix**: Added GRANT SELECT cho `api.f1_customers_summary` và `api.f1_customer_orders` cho service_role, anon, authenticated
+- **Performance Review**: Created optimization plan in `PLAN.md`
+  - Identified 3 Edge Functions có thể thay bằng direct Supabase query
+  - `get-f0-my-customers`, `get-f1-customer-detail`, `manage-notifications` (GET only)
+  - Estimated improvement: 300-800ms per request (eliminate cold start)
+
+### 2025-12-01 (Session 1)
 - **ReferCustomerPage.tsx**: Removed mock data, now loads real referrals from database
 - **campaignService.ts**: Added `getRecentReferrals()` method
 - **webhook-affiliate-check-voucher-invoice v8**: Fixed type mismatch bug comparing `invoice_id` (string vs number)
@@ -234,3 +261,30 @@ F0 requests withdrawal → commission_status: paid
 - **Cron Backup System**: Added VIEW `vouchers_need_commission_check` + Edge Function `cron-affiliate-commission-sync` + pg_cron job (every 15 min)
 - **get-f0-dashboard-stats v15**: Fixed F1 stats calculation - now uses `commission_records` instead of querying `kiotviet.invoices` (cross-schema query was failing silently)
 - **Supabase CLI**: Installed as dev dependency (v2.64.1), updated CLAUDE.md with deployment rules (MCP cannot disable JWT)
+- **F1 Customer Feature**: New "F1 Của Bạn" tab in F0 portal
+  - VIEWs: `api.f1_customers_summary`, `api.f1_customer_orders` (realtime data from commission_records)
+  - Edge Functions: `get-f0-my-customers`, `get-f1-customer-detail`
+  - Frontend: `MyCustomersPage.tsx` (with inline detail view)
+  - Service: `f1CustomerService.ts`
+  - Types: `src/types/f1Customer.ts`
+
+---
+
+## 10. PERFORMANCE OPTIMIZATION (Pending)
+
+See `PLAN.md` for full details. Summary:
+
+### Can Replace with Direct Query
+| Edge Function | Estimated Improvement |
+|--------------|----------------------|
+| `get-f0-my-customers` | 300-800ms |
+| `get-f1-customer-detail` | 200-500ms |
+| `manage-notifications` (GET) | 200-400ms |
+
+### Must Keep as Edge Function
+| Edge Function | Reason |
+|--------------|--------|
+| `get-f0-dashboard-stats` | Complex: 7 queries, tier calculation, adjustments |
+| `get-f0-referral-history` | Complex: 4 joins, nested response |
+| `manage-withdrawal-request` | Business logic validation |
+| `send-otp-*`, `verify-otp-*` | External API / Security |
