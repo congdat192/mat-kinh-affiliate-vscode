@@ -113,7 +113,7 @@ const getStatusBadge = (status: string, label: string, daysUntilLock?: number | 
       );
     case 'cancelled':
       return (
-        <Badge variant="destructive" className="text-xs">
+        <Badge variant="danger" className="text-xs">
           <XCircle className="w-3 h-3 mr-1" />
           {label}
         </Badge>
@@ -128,7 +128,7 @@ const getStatusBadge = (status: string, label: string, daysUntilLock?: number | 
       );
     default:
       return (
-        <Badge variant="outline" className="text-xs text-gray-500">
+        <Badge variant="default" className="text-xs text-gray-500">
           <Clock className="w-3 h-3 mr-1" />
           {label || 'Chưa xác định'}
         </Badge>

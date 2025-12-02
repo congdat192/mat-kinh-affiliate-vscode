@@ -75,6 +75,9 @@ class F1CustomerService {
         total_commission: Number(c.total_commission) || 0,
         paid_commission: Number(c.paid_commission) || 0,
         pending_commission: Number(c.pending_commission) || 0,
+        // v16: Lock system fields
+        locked_commission: Number(c.locked_commission) || 0,
+        cancelled_commission: Number(c.cancelled_commission) || 0,
         last_order_date: c.last_order_date,
         last_order_code: c.last_order_code,
         has_valid_order: c.has_valid_order || false,
@@ -135,25 +138,40 @@ class F1CustomerService {
       }
 
       // Format orders to match expected type
-      const formattedOrders: F1CustomerOrder[] = (orders || []).map((o) => ({
-        id: o.id,
-        voucher_code: o.voucher_code || '',
-        invoice_code: o.invoice_code || '',
-        invoice_amount: Number(o.invoice_amount) || 0,
-        invoice_date: o.invoice_date,
-        invoice_status: o.invoice_status || '',
-        basic_amount: Number(o.basic_amount) || 0,
-        first_order_amount: Number(o.first_order_amount) || 0,
-        tier_bonus_amount: Number(o.tier_bonus_amount) || 0,
-        total_commission: Number(o.total_commission) || 0,
-        commission_status: o.commission_status || '',
-        status_label: o.status_label || '',
-        order_type: o.order_type || '',
-        is_lifetime_commission: o.is_lifetime_commission || false,
-        invoice_cancelled_at: o.invoice_cancelled_at,
-        paid_at: o.paid_at,
-        created_at: o.created_at,
-      }));
+      // Calculate days until lock for pending orders
+      const now = new Date();
+      const formattedOrders: F1CustomerOrder[] = (orders || []).map((o) => {
+        let daysUntilLock: number | null = null;
+        if (o.lock_date && o.commission_status === 'pending') {
+          const lockDate = new Date(o.lock_date);
+          const diffTime = lockDate.getTime() - now.getTime();
+          daysUntilLock = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+        }
+        return {
+          id: o.id,
+          voucher_code: o.voucher_code || '',
+          invoice_code: o.invoice_code || '',
+          invoice_amount: Number(o.invoice_amount) || 0,
+          invoice_date: o.invoice_date,
+          invoice_status: o.invoice_status || '',
+          basic_amount: Number(o.basic_amount) || 0,
+          first_order_amount: Number(o.first_order_amount) || 0,
+          tier_bonus_amount: Number(o.tier_bonus_amount) || 0,
+          total_commission: Number(o.total_commission) || 0,
+          commission_status: o.commission_status || 'pending',
+          status_label: o.status_label || '',
+          order_type: o.order_type || '',
+          is_lifetime_commission: o.is_lifetime_commission || false,
+          invoice_cancelled_at: o.invoice_cancelled_at,
+          paid_at: o.paid_at,
+          // v16: Lock system fields
+          qualified_at: o.qualified_at || null,
+          lock_date: o.lock_date || null,
+          locked_at: o.locked_at || null,
+          days_until_lock: daysUntilLock,
+          created_at: o.created_at,
+        };
+      });
 
       return {
         success: true,
@@ -170,6 +188,9 @@ class F1CustomerService {
             total_commission: Number(customerData.total_commission) || 0,
             paid_commission: Number(customerData.paid_commission) || 0,
             pending_commission: Number(customerData.pending_commission) || 0,
+            // v16: Lock system fields
+            locked_commission: Number(customerData.locked_commission) || 0,
+            cancelled_commission: Number(customerData.cancelled_commission) || 0,
             last_order_date: customerData.last_order_date,
             last_order_code: customerData.last_order_code,
             has_valid_order: customerData.has_valid_order || false,
