@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-console.info('get-f0-dashboard-stats v15 - Fix: Calculate F1 stats from commission_records instead of kiotviet.invoices');
+console.info('get-f0-dashboard-stats v16 - Lock system: pending → locked → paid, monthly commission breakdown');
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -149,14 +149,15 @@ Deno.serve(async (req) => {
     const totalReferralsThisQuarter = vouchers.filter(v => new Date(v.created_at) >= quarterStart).length;
 
     // ========================================
-    // v15: Calculate F1 stats from commission_records (not kiotviet.invoices)
-    // This is more reliable because commission_records are only created when invoice is fully paid
+    // v16: Calculate F1 stats from commission_records with LOCK SYSTEM
+    // Status flow: pending → locked → paid
+    // EXP only counts when status = 'locked' or 'paid' (not pending)
     // ========================================
 
-    // Filter valid commissions (available or paid, not cancelled)
+    // Filter valid commissions for EXP calculation (locked or paid only - NOT pending)
     const validCommissions = commissions.filter(c =>
-      (c.status === 'available' || c.status === 'paid') &&
-      !c.invoice_cancelled_at
+      (c.status === 'locked' || c.status === 'paid')
+      // Note: locked commissions are not affected by invoice cancellation
     );
 
     // Calculate total F1 revenue from valid commissions
@@ -173,8 +174,8 @@ Deno.serve(async (req) => {
       !validCommissions.some(c => c.f1_customer_id) // Has invoice but no valid commission
     ).length;
 
-    console.log(`=== F1 STATS (v15 from commission_records) ===`);
-    console.log(`Valid commissions: ${validCommissions.length}`);
+    console.log(`=== F1 STATS (v16 LOCK SYSTEM from commission_records) ===`);
+    console.log(`Valid commissions (locked+paid): ${validCommissions.length}`);
     console.log(`Total F1 Revenue: ${totalF1Revenue}`);
     console.log(`Unique F1 Customers: ${qualifiedF1Count}`);
 
@@ -187,31 +188,46 @@ Deno.serve(async (req) => {
     console.log(`Raw Qualified F1: ${qualifiedF1Count}, Adjusted: ${adjustedF1Count}`);
     console.log(`Raw Revenue: ${totalF1Revenue}, Adjusted: ${adjustedF1Revenue}`);
 
-    // Calculate commission stats - v14: exclude cancelled and handle cancelled-after-paid
-    const activeCommissions = commissions.filter(c =>
-      c.status !== 'cancelled' &&
-      !c.invoice_cancelled_at  // Exclude any with cancelled invoice (unless paid before cancel)
-    );
+    // ========================================
+    // v16: Calculate commission stats with LOCK SYSTEM
+    // Status: pending → locked → paid | cancelled
+    // ========================================
 
-    // Commissions that were paid before invoice was cancelled (these are kept)
-    const paidBeforeCancelledCommissions = commissions.filter(c =>
-      c.status === 'paid' && c.invoice_cancelled_after_paid === true
-    );
+    // Active commissions = not cancelled
+    const activeCommissions = commissions.filter(c => c.status !== 'cancelled');
 
-    const availableCommissions = activeCommissions.filter(c => c.status === 'available');
-    const processingCommissions = activeCommissions.filter(c => c.status === 'processing');
-    // Include paid-before-cancelled in paid count
-    const paidCommissions = [
-      ...activeCommissions.filter(c => c.status === 'paid'),
-      ...paidBeforeCancelledCommissions
-    ];
+    // Pending: Waiting for lock period to expire
+    const pendingCommissions = commissions.filter(c => c.status === 'pending');
+
+    // Locked: Lock period expired, EXP counted, waiting for payment
+    const lockedCommissions = commissions.filter(c => c.status === 'locked');
+
+    // Paid: Already paid out
+    const paidCommissions = commissions.filter(c => c.status === 'paid');
+
+    // Cancelled: Invoice cancelled before lock period
     const cancelledCommissions = commissions.filter(c => c.status === 'cancelled');
 
-    const totalCommission = activeCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
-    const availableCommission = availableCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
-    const processingCommission = processingCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
+    // Calculate amounts
+    const pendingCommission = pendingCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
+    const lockedCommission = lockedCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
     const paidCommission = paidCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
     const cancelledCommission = cancelledCommissions.reduce((sum, c) => sum + (Number(c.total_commission) || 0), 0);
+
+    // Total = pending + locked + paid (excludes cancelled)
+    const totalCommission = pendingCommission + lockedCommission + paidCommission;
+
+    // Available = locked (ready for admin to pay) - deprecated concept in new system
+    const availableCommission = lockedCommission;
+
+    // For backward compatibility
+    const processingCommission = 0;
+
+    console.log(`=== COMMISSION STATS (v16 LOCK SYSTEM) ===`);
+    console.log(`Pending: ${pendingCommissions.length} (${pendingCommission.toLocaleString()}đ)`);
+    console.log(`Locked: ${lockedCommissions.length} (${lockedCommission.toLocaleString()}đ)`);
+    console.log(`Paid: ${paidCommissions.length} (${paidCommission.toLocaleString()}đ)`);
+    console.log(`Cancelled: ${cancelledCommissions.length} (${cancelledCommission.toLocaleString()}đ)`);
 
     // Commission breakdown
     const basicCommissionTotal = activeCommissions.reduce((sum, c) => sum + (Number(c.basic_amount) || 0), 0);
@@ -226,7 +242,7 @@ Deno.serve(async (req) => {
       .filter(w => w.status === 'completed')
       .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
 
-    const availableBalance = Math.max(0, availableCommission - pendingWithdrawals);
+    // Note: availableBalance is deprecated - now using lockedCommission directly
 
     // Determine tier using adjusted counts
     let currentTierIndex = 0;
@@ -294,20 +310,30 @@ Deno.serve(async (req) => {
         referralsThisQuarter: adjustedF1Count,  // v14: Use adjusted count
         totalReferralsThisQuarter,
 
-        // Commission stats
+        // v16: Commission stats with LOCK SYSTEM
         totalCommission,
-        availableCommission,
-        processingCommission,
+        pendingCommission,      // NEW: Waiting for lock period
+        lockedCommission,       // NEW: Locked, ready for payment
         paidCommission,
-        cancelledCommission,  // v14: Add cancelled commission
-        availableBalance,
+        cancelledCommission,
+
+        // Backward compatibility
+        availableCommission,    // = lockedCommission (deprecated name)
+        processingCommission,   // = 0 (deprecated)
+        availableBalance: lockedCommission,  // = lockedCommission (deprecated)
+
+        // v16: Commission counts
+        pendingCount: pendingCommissions.length,
+        lockedCount: lockedCommissions.length,
+        paidCount: paidCommissions.length,
+        cancelledCount: cancelledCommissions.length,
 
         // Commission breakdown
         basicCommissionTotal,
         firstOrderCommissionTotal,
         tierBonusTotal,
 
-        // Withdrawal stats
+        // Withdrawal stats (deprecated - admin pays directly now)
         pendingWithdrawals,
         completedWithdrawals,
 

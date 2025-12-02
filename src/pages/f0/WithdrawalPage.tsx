@@ -3,23 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import {
   Wallet,
   DollarSign,
-  TrendingDown,
   CheckCircle,
   Clock,
   XCircle,
-  Eye,
-  X,
   AlertTriangle,
   Loader2,
   RefreshCw,
   Shield,
+  Lock,
+  Info
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Table,
@@ -44,6 +41,10 @@ interface Balance {
   availableBalance: number;
   pendingWithdrawals: number;
   completedWithdrawals: number;
+  // v16: Lock system fields
+  pendingCommission?: number;
+  lockedCommission?: number;
+  paidCommission?: number;
 }
 
 interface Withdrawal {
@@ -77,11 +78,10 @@ interface WithdrawalData {
 const WithdrawalPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<WithdrawalData | null>(null);
-  const [amount, setAmount] = useState('');
-  const [amountError, setAmountError] = useState('');
+  // v16: Removed withdrawal form states - F0 no longer submits withdrawal requests
+  // Admin pays directly via batch payment system
 
   // Get F0 user from storage
   const getF0User = () => {
@@ -96,7 +96,7 @@ const WithdrawalPage = () => {
     return null;
   };
 
-  // Fetch withdrawal data
+  // Fetch withdrawal data - v16: Also fetch dashboard stats for lock system data
   const fetchWithdrawalData = async (showRefreshing = false) => {
     const f0User = getF0User();
     if (!f0User?.id) {
@@ -111,29 +111,58 @@ const WithdrawalPage = () => {
     }
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            action: 'get',
-            f0_id: f0User.id,
-          }),
-        }
-      );
+      // Fetch both withdrawal data and dashboard stats in parallel
+      const [withdrawalResponse, dashboardResponse] = await Promise.all([
+        fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({
+              action: 'get',
+              f0_id: f0User.id,
+            }),
+          }
+        ),
+        fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/get-f0-dashboard-stats`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({
+              f0_id: f0User.id,
+            }),
+          }
+        ),
+      ]);
 
-      const result = await response.json();
+      const withdrawalResult = await withdrawalResponse.json();
+      const dashboardResult = await dashboardResponse.json();
 
-      if (!result.success) {
-        toast.error(result.error || 'Không thể tải dữ liệu');
+      if (!withdrawalResult.success) {
+        toast.error(withdrawalResult.error || 'Không thể tải dữ liệu');
         return;
       }
 
-      setData(result.data);
+      // Merge lock system data from dashboard stats into balance
+      const mergedData: WithdrawalData = {
+        ...withdrawalResult.data,
+        balance: {
+          ...withdrawalResult.data.balance,
+          // v16: Lock system fields from dashboard stats
+          pendingCommission: dashboardResult.success ? dashboardResult.data.stats.pendingCommission : 0,
+          lockedCommission: dashboardResult.success ? dashboardResult.data.stats.lockedCommission : 0,
+          paidCommission: dashboardResult.success ? dashboardResult.data.stats.paidCommission : 0,
+        },
+      };
+
+      setData(mergedData);
     } catch (err) {
       console.error('Withdrawal data fetch error:', err);
       toast.error('Có lỗi xảy ra khi tải dữ liệu');
@@ -214,113 +243,8 @@ const WithdrawalPage = () => {
     }
   };
 
-  // Handle submit withdrawal request
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!data) return;
-
-    const f0User = getF0User();
-    if (!f0User?.id) {
-      navigate('/f0/auth/login');
-      return;
-    }
-
-    // Validate
-    const amountNum = parseInt(amount);
-    if (!amount || isNaN(amountNum)) {
-      setAmountError('Vui lòng nhập số tiền');
-      return;
-    }
-
-    if (amountNum < data.minWithdrawalAmount) {
-      setAmountError(`Số tiền rút tối thiểu là ${formatCurrency(data.minWithdrawalAmount)}`);
-      return;
-    }
-
-    if (amountNum > data.balance.availableBalance) {
-      setAmountError('Số dư không đủ');
-      return;
-    }
-
-    setAmountError('');
-    setSubmitting(true);
-
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            action: 'create',
-            f0_id: f0User.id,
-            amount: amountNum,
-          }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!result.success) {
-        toast.error(result.error || 'Không thể tạo yêu cầu rút tiền');
-        return;
-      }
-
-      toast.success('Yêu cầu rút tiền đã được tạo thành công!');
-      setAmount('');
-      fetchWithdrawalData(true);
-    } catch (err) {
-      console.error('Create withdrawal error:', err);
-      toast.error('Có lỗi xảy ra');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // Handle cancel withdrawal
-  const handleCancelWithdrawal = async (requestId: string) => {
-    if (!confirm('Bạn có chắc chắn muốn hủy yêu cầu rút tiền này?')) {
-      return;
-    }
-
-    const f0User = getF0User();
-    if (!f0User?.id) return;
-
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-withdrawal-request`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            action: 'cancel',
-            f0_id: f0User.id,
-            request_id: requestId,
-          }),
-        }
-      );
-
-      const result = await response.json();
-
-      if (!result.success) {
-        toast.error(result.error || 'Không thể hủy yêu cầu');
-        return;
-      }
-
-      toast.success('Đã hủy yêu cầu rút tiền');
-      fetchWithdrawalData(true);
-    } catch (err) {
-      console.error('Cancel withdrawal error:', err);
-      toast.error('Có lỗi xảy ra');
-    }
-  };
+  // v16: Removed handleSubmit and handleCancelWithdrawal - F0 no longer submits withdrawal requests
+  // Admin pays directly via batch payment system on the 5th of each month
 
   // Loading state
   if (loading) {
@@ -350,36 +274,32 @@ const WithdrawalPage = () => {
     );
   }
 
-  const { balance, bankInfo, withdrawals, minWithdrawalAmount } = data;
+  const { balance, bankInfo, withdrawals } = data;
 
-  // Balance cards data
+  // v16: Updated balance cards for lock system - showing commission status instead of withdrawal balance
   const balanceCards = [
     {
-      title: 'Số Dư Khả Dụng',
-      value: formatCurrency(balance.availableBalance),
-      icon: Wallet,
+      title: 'Chờ Chốt',
+      value: formatCurrency(balance.pendingCommission || 0),
+      icon: Clock,
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50',
+    },
+    {
+      title: 'Đã Chốt',
+      value: formatCurrency(balance.lockedCommission || balance.availableBalance || 0),
+      icon: Lock,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50',
+    },
+    {
+      title: 'Đã Nhận',
+      value: formatCurrency(balance.paidCommission || balance.completedWithdrawals || 0),
+      icon: CheckCircle,
       color: 'text-green-600',
       bgColor: 'bg-green-50',
     },
-    {
-      title: 'Đang Chờ Rút',
-      value: formatCurrency(balance.pendingWithdrawals),
-      icon: Clock,
-      color: 'text-yellow-600',
-      bgColor: 'bg-yellow-50',
-    },
-    {
-      title: 'Đã Rút',
-      value: formatCurrency(balance.completedWithdrawals),
-      icon: TrendingDown,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-    },
   ];
-
-  // Check if bank is verified
-  const canWithdraw = bankInfo.verified && balance.availableBalance >= minWithdrawalAmount;
-  const hasPendingRequest = withdrawals.some(w => w.status === 'pending');
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6 lg:p-8">
@@ -387,9 +307,9 @@ const WithdrawalPage = () => {
         {/* Page Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Rút Tiền</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Thanh Toán Hoa Hồng</h1>
             <p className="text-gray-600 mt-1">
-              Quản lý số dư và yêu cầu rút tiền hoa hồng
+              Theo dõi tình trạng và lịch sử thanh toán hoa hồng
             </p>
           </div>
           <Button
@@ -445,21 +365,90 @@ const WithdrawalPage = () => {
           </Alert>
         )}
 
-        {/* Create Withdrawal Request */}
+        {/* v16: Commission Status - Lock System */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-primary-500" />
-              Tạo Yêu Cầu Rút Tiền
+              Tình Trạng Hoa Hồng
             </CardTitle>
             <CardDescription>
-              Số tiền sẽ được chuyển vào tài khoản ngân hàng đã xác minh
+              Hoa hồng được chốt sau 15 ngày và thanh toán tự động vào ngày 5 hàng tháng
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Commission Status Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* Pending Commission */}
+              <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span className="text-sm font-medium text-orange-700">Chờ chốt</span>
+                </div>
+                <p className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(balance.pendingCommission || 0)}
+                </p>
+                <p className="text-xs text-orange-600 mt-1">
+                  Đang trong thời gian chờ xác nhận (15 ngày)
+                </p>
+              </div>
+
+              {/* Locked Commission */}
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-4 h-4 text-purple-600" />
+                  <span className="text-sm font-medium text-purple-700">Đã chốt</span>
+                </div>
+                <p className="text-2xl font-bold text-purple-600">
+                  {formatCurrency(balance.lockedCommission || balance.availableBalance || 0)}
+                </p>
+                <p className="text-xs text-purple-600 mt-1">
+                  Sẽ được thanh toán vào ngày 5 tháng sau
+                </p>
+              </div>
+
+              {/* Paid Commission */}
+              <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-700">Đã nhận</span>
+                </div>
+                <p className="text-2xl font-bold text-green-600">
+                  {formatCurrency(balance.paidCommission || balance.completedWithdrawals || 0)}
+                </p>
+                <p className="text-xs text-green-600 mt-1">
+                  Đã được chuyển vào tài khoản của bạn
+                </p>
+              </div>
+            </div>
+
+            {/* Payment Info Banner */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <h4 className="font-medium text-blue-900">Quy trình thanh toán hoa hồng</h4>
+                  <ul className="mt-2 space-y-2 text-sm text-blue-800">
+                    <li className="flex items-center gap-2">
+                      <span className="w-5 h-5 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-semibold">1</span>
+                      <span><strong>Chờ chốt:</strong> Hoa hồng từ đơn hàng mới sẽ được chờ xác nhận trong 15 ngày</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="w-5 h-5 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-xs font-semibold">2</span>
+                      <span><strong>Đã chốt:</strong> Sau 15 ngày, hoa hồng được chốt và EXP được cộng vào tài khoản</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="w-5 h-5 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-semibold">3</span>
+                      <span><strong>Thanh toán:</strong> Vào ngày 5 hàng tháng, hoa hồng đã chốt sẽ được chuyển vào tài khoản ngân hàng của bạn</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
             {/* Bank Info Display */}
-            {bankInfo.verified && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            {bankInfo.verified ? (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mt-6">
                 <div className="flex items-center gap-2 mb-3">
                   <Shield className="w-5 h-5 text-green-600" />
                   <span className="font-medium text-green-800">Tài khoản nhận tiền (đã xác minh)</span>
@@ -479,97 +468,47 @@ const WithdrawalPage = () => {
                   </div>
                 </div>
               </div>
+            ) : (
+              <Alert variant="warning" className="mt-6">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertTitle>Chưa xác minh tài khoản ngân hàng</AlertTitle>
+                <AlertDescription>
+                  Bạn cần xác minh thông tin ngân hàng để nhận thanh toán hoa hồng.
+                  <Button
+                    variant="link"
+                    className="ml-2 p-0 h-auto"
+                    onClick={() => navigate('/f0/profile')}
+                  >
+                    Xác minh ngay →
+                  </Button>
+                </AlertDescription>
+              </Alert>
             )}
-
-            {/* Warning Alert */}
-            <Alert variant="info" className="mb-6">
-              <AlertTitle>Lưu ý</AlertTitle>
-              <AlertDescription>
-                <ul className="list-disc list-inside space-y-1 text-sm mt-2">
-                  <li>Số tiền rút tối thiểu: {formatCurrency(minWithdrawalAmount)}</li>
-                  <li>Thời gian xử lý: 1-3 ngày làm việc</li>
-                  <li>Bạn chỉ có thể tạo 1 yêu cầu rút tiền tại một thời điểm</li>
-                </ul>
-              </AlertDescription>
-            </Alert>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="max-w-md">
-                {/* Amount */}
-                <div className="space-y-2">
-                  <Label htmlFor="amount">
-                    Số tiền rút <span className="text-red-500">*</span>
-                  </Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    placeholder="Nhập số tiền"
-                    value={amount}
-                    onChange={(e) => {
-                      setAmount(e.target.value);
-                      setAmountError('');
-                    }}
-                    className={amountError ? 'border-red-500' : ''}
-                    disabled={!canWithdraw || hasPendingRequest}
-                  />
-                  {amountError && (
-                    <p className="text-sm text-red-500">{amountError}</p>
-                  )}
-                  <p className="text-xs text-gray-500">
-                    Số dư khả dụng: {formatCurrency(balance.availableBalance)} | Tối thiểu: {formatCurrency(minWithdrawalAmount)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Submit Button */}
-              <div className="flex items-center gap-4">
-                <Button
-                  type="submit"
-                  disabled={!canWithdraw || submitting || hasPendingRequest}
-                  className="min-w-[200px]"
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Đang xử lý...
-                    </>
-                  ) : (
-                    'Gửi Yêu Cầu Rút Tiền'
-                  )}
-                </Button>
-                {hasPendingRequest && (
-                  <p className="text-sm text-amber-600">
-                    Bạn đang có yêu cầu chờ xử lý. Vui lòng đợi yêu cầu hoàn tất.
-                  </p>
-                )}
-              </div>
-            </form>
           </CardContent>
         </Card>
 
-        {/* Withdrawal History */}
+        {/* Payment History - v16: Renamed from Withdrawal History */}
         <Card>
           <CardHeader>
-            <CardTitle>Lịch Sử Rút Tiền</CardTitle>
-            <CardDescription>Theo dõi trạng thái các yêu cầu rút tiền</CardDescription>
+            <CardTitle>Lịch Sử Thanh Toán</CardTitle>
+            <CardDescription>Theo dõi các khoản thanh toán hoa hồng từ hệ thống</CardDescription>
           </CardHeader>
           <CardContent>
             {withdrawals.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
                 <Wallet className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-lg font-medium">Chưa có lịch sử rút tiền</p>
-                <p className="text-sm mt-1">Tạo yêu cầu rút tiền đầu tiên của bạn</p>
+                <p className="text-lg font-medium">Chưa có lịch sử thanh toán</p>
+                <p className="text-sm mt-1">Hoa hồng đã chốt sẽ được thanh toán vào ngày 5 hàng tháng</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Ngày Tạo</TableHead>
+                      <TableHead>Ngày Thanh Toán</TableHead>
                       <TableHead className="text-right">Số Tiền</TableHead>
                       <TableHead>Thông Tin Ngân Hàng</TableHead>
                       <TableHead>Trạng Thái</TableHead>
-                      <TableHead className="text-center">Thao Tác</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -614,19 +553,6 @@ const WithdrawalPage = () => {
                                 </p>
                               )}
                             </div>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            {withdrawal.status === 'pending' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleCancelWithdrawal(withdrawal.id)}
-                                className="flex items-center gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <X className="w-3 h-3" />
-                                Hủy
-                              </Button>
-                            )}
                           </TableCell>
                         </TableRow>
                       );

@@ -18,6 +18,7 @@ import {
   XCircle,
   Copy,
   Check,
+  Lock,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -86,8 +87,8 @@ const getAvatarColor = (name: string) => {
   return colors[index];
 };
 
-// Get commission status badge
-const getStatusBadge = (status: string, label: string) => {
+// Get commission status badge - Updated for Lock System v16
+const getStatusBadge = (status: string, label: string, daysUntilLock?: number | null) => {
   switch (status) {
     case 'paid':
       return (
@@ -96,10 +97,10 @@ const getStatusBadge = (status: string, label: string) => {
           {label}
         </Badge>
       );
-    case 'available':
+    case 'locked':
       return (
-        <Badge variant="default" className="text-xs">
-          <CheckCircle2 className="w-3 h-3 mr-1" />
+        <Badge variant="default" className="text-xs bg-purple-100 text-purple-700 border-purple-200">
+          <Lock className="w-3 h-3 mr-1" />
           {label}
         </Badge>
       );
@@ -107,14 +108,29 @@ const getStatusBadge = (status: string, label: string) => {
       return (
         <Badge variant="warning" className="text-xs">
           <Clock className="w-3 h-3 mr-1" />
-          {label}
+          {label}{daysUntilLock !== null && daysUntilLock !== undefined && daysUntilLock > 0 ? ` (${daysUntilLock} ngày)` : ''}
         </Badge>
       );
-    default:
+    case 'cancelled':
       return (
         <Badge variant="destructive" className="text-xs">
           <XCircle className="w-3 h-3 mr-1" />
           {label}
+        </Badge>
+      );
+    // Legacy support for 'available' status
+    case 'available':
+      return (
+        <Badge variant="default" className="text-xs bg-purple-100 text-purple-700 border-purple-200">
+          <Lock className="w-3 h-3 mr-1" />
+          Đã chốt
+        </Badge>
+      );
+    default:
+      return (
+        <Badge variant="outline" className="text-xs text-gray-500">
+          <Clock className="w-3 h-3 mr-1" />
+          {label || 'Chưa xác định'}
         </Badge>
       );
   }
@@ -131,7 +147,7 @@ const OrderRow = memo(({ order }: OrderRowProps) => (
   <div className="bg-white p-3 rounded-lg border text-sm">
     <div className="flex items-center justify-between mb-2">
       <span className="font-medium">{order.invoice_code}</span>
-      {getStatusBadge(order.commission_status, order.status_label)}
+      {getStatusBadge(order.commission_status, order.status_label, order.days_until_lock)}
     </div>
     <div className="flex items-center justify-between text-gray-500">
       <span>{formatDateTime(order.invoice_date)}</span>
@@ -271,18 +287,35 @@ const CustomerRow = memo(({
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 text-sm">
-              <div className="bg-white p-3 rounded-lg border">
-                <p className="text-gray-500 text-xs">Tổng hoa hồng</p>
-                <p className="font-semibold text-gray-900">{formatCurrencyFull(customer.total_commission)}</p>
+            {/* Commission Breakdown - Lock System v16 */}
+            <div className="grid grid-cols-4 gap-3 text-sm">
+              <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
+                <p className="text-orange-600 text-xs flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  Chờ chốt
+                </p>
+                <p className="font-semibold text-orange-600">{formatCurrencyFull(customer.pending_commission || 0)}</p>
               </div>
-              <div className="bg-white p-3 rounded-lg border">
-                <p className="text-gray-500 text-xs">Đã thanh toán</p>
-                <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_commission)}</p>
+              <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
+                <p className="text-purple-600 text-xs flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  Đã chốt
+                </p>
+                <p className="font-semibold text-purple-600">{formatCurrencyFull(customer.locked_commission || 0)}</p>
               </div>
-              <div className="bg-white p-3 rounded-lg border">
-                <p className="text-gray-500 text-xs">Chờ xử lý</p>
-                <p className="font-semibold text-yellow-600">{formatCurrencyFull(customer.pending_commission)}</p>
+              <div className="bg-green-50 p-3 rounded-lg border border-green-100">
+                <p className="text-green-600 text-xs flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Đã nhận
+                </p>
+                <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_commission || 0)}</p>
+              </div>
+              <div className="bg-gray-50 p-3 rounded-lg border">
+                <p className="text-gray-500 text-xs flex items-center gap-1">
+                  <DollarSign className="w-3 h-3" />
+                  Tổng
+                </p>
+                <p className="font-semibold text-gray-900">{formatCurrencyFull(customer.total_commission || 0)}</p>
               </div>
             </div>
           </div>

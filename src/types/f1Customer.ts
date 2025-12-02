@@ -12,6 +12,9 @@ export interface F1CustomerSummary {
   total_commission: number;
   paid_commission: number;
   pending_commission: number;
+  // v16: Lock system fields
+  locked_commission: number;
+  cancelled_commission: number;
   last_order_date: string | null;
   last_order_code: string | null;
   has_valid_order: boolean;
@@ -22,6 +25,9 @@ export interface F1CustomerDetail extends F1CustomerSummary {
   first_invoice_code: string;
   first_invoice_date: string;
 }
+
+// v16: Commission status type for lock system
+export type CommissionStatus = 'pending' | 'locked' | 'paid' | 'cancelled';
 
 export interface F1CustomerOrder {
   id: string;
@@ -34,12 +40,17 @@ export interface F1CustomerOrder {
   first_order_amount: number;
   tier_bonus_amount: number;
   total_commission: number;
-  commission_status: string;
+  commission_status: CommissionStatus;
   status_label: string;
   order_type: string;
   is_lifetime_commission: boolean;
   invoice_cancelled_at: string | null;
   paid_at: string | null;
+  // v16: Lock system fields
+  qualified_at: string | null;
+  lock_date: string | null;
+  locked_at: string | null;
+  days_until_lock: number | null;
   created_at: string;
 }
 

@@ -98,10 +98,15 @@ mat-kinh-affiliate-vscode/
 - Services handle API calls, components handle UI
 - Toast notifications via `@/components/ui/toast`
 
-### Commission Logic
+### Commission Logic (v16 Lock System)
 - Revenue counted only when `total = totalpayment` (fully paid)
-- Commission status: pending → available → paid
-- Tier calculation based on fully paid invoices only
+- **Commission status flow**: `pending` → `locked` → `paid`
+- **Lock period**: 15 days after invoice is fully paid
+- **Tier calculation**: Only counts `locked` + `paid` commissions (NOT pending)
+- **Admin payment**: Batch payment on 5th of each month via `admin-process-payment-batch`
+- **Cancellation rules**:
+  - If invoice cancelled while `pending` → commission cancelled
+  - If invoice cancelled after `locked` → commission kept
 
 ### Environment
 - Frontend env vars prefixed with `VITE_`
@@ -156,8 +161,11 @@ Tables synced from KiotViet POS via webhook:
 | `voucher_code` | Voucher code issued |
 | `status` | claimed / used |
 | `invoice_id` | Linked KiotViet invoice ID |
-| `commission_status` | invalid / pending / available / paid |
-| `invalid_reason_code` | INVOICE_NOT_FULLY_PAID, VOUCHER_NOT_USED, etc. |
+| `commission_status` | pending / locked / paid / cancelled |
+| `qualified_at` | Timestamp when commission became pending (invoice fully paid) |
+| `lock_date` | Date when commission will be locked (qualified_at + 15 days) |
+| `locked_at` | Timestamp when commission was actually locked |
+| `paid_at` | Timestamp when commission was paid to F0 |
 
 ---
 
@@ -168,8 +176,10 @@ Tables synced from KiotViet POS via webhook:
 |----------|---------|-------------|
 | `create-referral-link` | v3 | Creates referral link with realtime conversion count |
 | `create-and-release-voucher-affiliate-internal` | v9 | Issues voucher for F1 customer claim |
-| `webhook-affiliate-check-voucher-invoice` | v9 | Handles KiotViet invoice webhook for commission calculation |
+| `webhook-affiliate-check-voucher-invoice` | v10 | Handles KiotViet invoice webhook for commission calculation (lock system v16) |
 | `cron-affiliate-commission-sync` | v1 | Backup cron job for missed webhooks (runs every 15 min) |
+| `cron-lock-commissions` | v1 | Locks pending commissions after 15-day period (runs daily at 1:00 AM) |
+| `admin-process-payment-batch` | v1 | Admin batch payment for locked commissions (runs on 5th of month) |
 
 ### Auth Functions
 | Function | Description |
@@ -179,10 +189,11 @@ Tables synced from KiotViet POS via webhook:
 | `login-affiliate` | F0 login with SHA-256 password verification |
 
 ### F1 Customer Functions
-| Function | Description |
-|----------|-------------|
-| `get-f0-my-customers` | Gets F1 customers list for F0 with summary stats |
-| `get-f1-customer-detail` | Gets F1 customer detail with order history |
+| Function | Version | Description |
+|----------|---------|-------------|
+| `get-f0-my-customers` | v2 | Gets F1 customers list for F0 with lock system fields |
+| `get-f1-customer-detail` | v2 | Gets F1 customer detail with order history + lock system |
+| `get-f0-dashboard-stats` | v16 | Dashboard stats with lock system support (pending/locked/paid breakdown) |
 
 ---
 
@@ -210,7 +221,7 @@ Tables synced from KiotViet POS via webhook:
 
 ---
 
-## 8. COMMISSION FLOW
+## 8. COMMISSION FLOW (v16 Lock System)
 
 ```
 F0 creates referral link
@@ -223,19 +234,63 @@ F1 purchases at store with voucher
          ↓
 KiotViet webhook fires on invoice create/update
          ↓
-webhook-affiliate-check-voucher-invoice:
+webhook-affiliate-check-voucher-invoice (v10):
   - If voucher used → status: used
-  - If total ≠ totalpayment → commission_status: invalid (INVOICE_NOT_FULLY_PAID)
-  - If total = totalpayment → commission_status: pending
+  - If total ≠ totalpayment → commission stays pending (re-check on next webhook)
+  - If total = totalpayment → commission_status: pending, qualified_at: now, lock_date: +15 days
          ↓
-Admin reviews & approves → commission_status: available
+┌─────────── 15-day waiting period ───────────┐
+│                                              │
+│  If invoice cancelled → commission cancelled │
+│  Invoice still valid → commission protected  │
+│                                              │
+└──────────────────────────────────────────────┘
          ↓
-F0 requests withdrawal → commission_status: paid
+cron-lock-commissions (daily at 1:00 AM):
+  - If lock_date <= today AND status = pending → commission_status: locked
+  - Updates F0 tier based on locked + paid commissions
+         ↓
+admin-process-payment-batch (5th of month):
+  - Gets all locked commissions for each F0
+  - Creates payment batch record
+  - Updates commission_status: locked → paid
+  - Records paid_at timestamp
+         ↓
+F0 receives payment (bank transfer / cash)
 ```
+
+### Key Rules
+- **EXP/Tier Calculation**: Only `locked` + `paid` count (pending does NOT count)
+- **F0 Cannot Withdraw**: Admin initiates all payments via batch process
+- **Cancellation Window**: 15 days for invoice corrections before commission locks
+- **No Rollback**: Once locked, commission cannot be cancelled even if invoice cancelled later
 
 ---
 
 ## 9. RECENT FIXES
+
+### 2025-12-02 (Commission Lock System v16 - Full Implementation)
+- **Commission Lock System Implementation**: Major overhaul of commission status flow
+  - Old: `pending` → `available` → `paid` (F0 requests withdrawal)
+  - New: `pending` → `locked` → `paid` (Admin batch payment)
+- **Edge Functions Updated/Created**:
+  - `webhook-affiliate-check-voucher-invoice` v10: Added lock system fields (`qualified_at`, `lock_date`)
+  - `cron-lock-commissions` v1: Daily cron job to lock pending commissions after 15 days
+  - `admin-process-payment-batch` v1: Admin batch payment function for locked commissions
+  - `get-f0-dashboard-stats` v16: Dashboard stats with pending/locked/paid breakdown
+  - `get-f0-my-customers` v2: Added `locked_commission`, `cancelled_commission` fields
+  - `get-f1-customer-detail` v2: Added lock system fields (`qualified_at`, `lock_date`, `locked_at`, `days_until_lock`)
+- **F0 Portal Updates**:
+  - `DashboardPage.tsx`: New commission status cards showing pending/locked/paid
+  - `MyCustomersPage.tsx`: Updated status badges with `days_until_lock` countdown, commission breakdown (Chờ chốt/Đã chốt/Đã nhận)
+  - `WithdrawalPage.tsx`: Converted to "Thanh Toán Hoa Hồng" (payment status page), fetches both `manage-withdrawal-request` + `get-f0-dashboard-stats` for lock system data
+  - `src/types/f1Customer.ts`: Added `CommissionStatus` type and lock system fields
+- **Database VIEWs Updated**:
+  - `api.f1_customers_summary`: Added `locked_commission`, `cancelled_commission`, changed 'available' → 'locked'
+  - `api.f1_customer_orders`: Added `qualified_at`, `lock_date`, `locked_at`, updated `status_label` CASE
+- **Database Schema Changes**:
+  - Added columns to `voucher_affiliate_tracking`: `qualified_at`, `lock_date`, `locked_at`
+  - `commission_status` values: `pending`, `locked`, `paid`, `cancelled`
 
 ### 2025-12-01 (Session 2)
 - **MyCustomersPage.tsx UI Redesign**: Complete rewrite with new CRM-style UI
@@ -270,9 +325,41 @@ F0 requests withdrawal → commission_status: paid
 
 ---
 
-## 10. PERFORMANCE OPTIMIZATION (Pending)
+## 10. RELATED PROJECTS
 
-See `PLAN.md` for full details. Summary:
+### Admin Affiliate Portal (Separate Project)
+- **Location**: `admin-affiliate/` (separate codebase)
+- **Purpose**: Admin quản lý hệ thống Affiliate
+- **Shared Resources**:
+  - Same Supabase project (`kcirpjxbjqagrqrjfldu`)
+  - Same schema `api` và `affiliate`
+  - Same Edge Functions (+ thêm `admin-*` functions)
+- **Plan Details**: See `PLAN.md` for full implementation plan
+
+### Architecture Overview
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         SUPABASE (Shared)                        │
+│  Database │ Auth │ Edge Functions │ Storage                      │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                      ▲
+         │                                      │
+    ┌────┴────┐                           ┌────┴────┐
+    │   F0    │                           │  Admin  │
+    │ Portal  │                           │ Portal  │
+    │ (This)  │                           │ (NEW)   │
+    └─────────┘                           └─────────┘
+    mat-kinh-affiliate-vscode/         admin-affiliate/
+```
+
+---
+
+## 11. PERFORMANCE OPTIMIZATION (Completed)
+
+### Phase 1 & 2: ✅ COMPLETED (2025-12-02)
+- Direct Supabase queries thay Edge Functions cho simple reads
+- React.memo cho CustomerRow, OrderRow
+- useMemo cho summary calculations
 
 ### Can Replace with Direct Query
 | Edge Function | Estimated Improvement |

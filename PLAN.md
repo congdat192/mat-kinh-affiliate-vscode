@@ -1,290 +1,521 @@
-# PERFORMANCE OPTIMIZATION PLAN
+# ADMIN AFFILIATE PORTAL - IMPLEMENTATION PLAN
 
-## Ngày: 2025-12-01
-## Mục tiêu: Tối ưu tốc độ load trang F0 Portal
-
----
-
-## 1. PHÂN TÍCH HIỆN TRẠNG
-
-### 1.1 Các Edge Functions đang gọi từ Frontend
-
-| Page | Edge Function | Số lần gọi | Mục đích |
-|------|---------------|------------|----------|
-| DashboardPage | `get-f0-dashboard-stats` | 1 | Stats tổng hợp, tier, recent activity |
-| ProfilePage | `get-f0-dashboard-stats` | 1 | Tier info cho profile |
-| ProfilePage | `send-otp-bank-verification` | 1 | Gửi OTP xác thực bank |
-| ProfilePage | `verify-otp-bank` | 1 | Verify OTP bank |
-| ReferralHistoryPage | `get-f0-referral-history` | 1 | Lịch sử referral + lifetime commissions |
-| MyCustomersPage | `get-f0-my-customers` | 1 | Danh sách F1 |
-| MyCustomersPage | `get-f1-customer-detail` | N | Chi tiết + orders của từng F1 (lazy load) |
-| NotificationsPage | `manage-notifications` | 4 | GET, mark read, mark all read, delete |
-| WithdrawalPage | `manage-withdrawal-request` | 3 | GET, create, cancel |
-
-### 1.2 VIEWs có sẵn trong schema `api`
-
-| VIEW | Mô tả | Có thể dùng direct query |
-|------|-------|--------------------------|
-| `f1_customers_summary` | Danh sách F1 với stats aggregated | ✅ CÓ |
-| `f1_customer_orders` | Lịch sử orders của F1 | ✅ CÓ |
-| `voucher_affiliate_tracking` | Tracking vouchers | ✅ CÓ |
-| `commission_records` | Commission records | ✅ CÓ |
-| `notifications` | Notifications | ✅ CÓ (chỉ GET) |
-| `withdrawal_requests` | Withdrawal requests | ✅ CÓ (chỉ GET) |
-| `f0_partners` | F0 info | ✅ CÓ |
-| `f0_tiers` | Tier config | ✅ CÓ |
+## Ngày: 2025-12-02
+## Mục tiêu: Xây dựng Admin Portal (PROJECT RIÊNG) để quản lý hệ thống Affiliate
 
 ---
 
-## 2. PHÂN LOẠI OPTIMIZATION
+## 1. TỔNG QUAN
 
-### 2.1 CÓ THỂ thay bằng Direct Query (Supabase Client)
-
-| Function | Lý do có thể thay | Ước tính cải thiện |
-|----------|-------------------|-------------------|
-| `get-f0-my-customers` | Chỉ query VIEW `f1_customers_summary` + aggregate summary | **300-800ms** |
-| `get-f1-customer-detail` | Chỉ query VIEW `f1_customer_orders` | **200-500ms** |
-| `manage-notifications` (GET only) | Chỉ SELECT từ `notifications` | **200-400ms** |
-
-### 2.2 KHÔNG NÊN thay (Business logic phức tạp)
-
-| Function | Lý do giữ Edge Function |
-|----------|------------------------|
-| `get-f0-dashboard-stats` | **Quá phức tạp**: Query 7 tables parallel, tính toán tier với adjustments, update F0 tier nếu thay đổi, format complex response |
-| `get-f0-referral-history` | **Phức tạp**: Join 4 queries (vouchers, summary, lifetimeCommissions, f1Assignments), filter phức tạp, format nested response |
-| `manage-notifications` (POST/PUT/DELETE) | **Business logic**: Mark read, mark all read, delete - cần service_role |
-| `manage-withdrawal-request` | **Business logic**: Create request, validate balance, update status |
-| `send-otp-bank-verification` | **External API**: Gọi Vihat SMS API |
-| `verify-otp-bank` | **Security**: OTP verification + update sensitive bank info |
-
----
-
-## 3. KẾ HOẠCH TRIỂN KHAI
-
-### Phase 1: Quick Wins - Direct Query (Ưu tiên CAO)
-
-#### 3.1 MyCustomersPage - Thay `get-f0-my-customers`
-
-**File:** `src/services/f1CustomerService.ts`
-
-**Before:**
-```typescript
-// Edge Function call - cold start 500-2000ms
-const response = await fetch(`${SUPABASE_URL}/functions/v1/get-f0-my-customers`, {...});
+### 1.1 Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         SUPABASE                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │  Database   │  │   Auth      │  │    Edge Functions       │  │
+│  │  (Shared)   │  │  (Shared)   │  │    (Shared)             │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                                      ▲
+         │                                      │
+    ┌────┴────┐                           ┌────┴────┐
+    │   F0    │                           │  Admin  │
+    │ Portal  │                           │ Portal  │
+    │ (This)  │                           │ (NEW)   │
+    └─────────┘                           └─────────┘
+    mat-kinh-affiliate-vscode/         admin-affiliate/ (NEW PROJECT)
 ```
 
-**After:**
+### 1.2 Shared Resources
+- **Database**: Cùng Supabase project `kcirpjxbjqagrqrjfldu`
+- **Schema**: Cùng schema `api` và `affiliate`
+- **Edge Functions**: Cùng functions, tạo thêm `admin-*` functions
+- **Auth**: Admin dùng Supabase Auth riêng (email/password với role)
+
+### 1.3 F0 Portal Hiện Có (Reference)
+| Page | Route | Description |
+|------|-------|-------------|
+| Dashboard | `/f0/dashboard` | Stats, tier, commission overview |
+| MyCustomers | `/f0/my-customers` | F1 list + inline detail với orders |
+| ReferCustomer | `/f0/refer-customer` | Create referral links, claim vouchers |
+| ReferralHistory | `/f0/referral-history` | Voucher usage history |
+| Withdrawal | `/f0/withdrawal` | Commission payment status (v16: readonly) |
+| Profile | `/f0/profile` | F0 profile, bank info |
+| Notifications | `/f0/notifications` | System notifications |
+
+---
+
+## 2. DATABASE SCHEMA (Đã có - Shared)
+
+### 2.1 Tables chính cho Admin
+| Table | Schema | Mục đích Admin |
+|-------|--------|----------------|
+| `f0_partners` | affiliate | Quản lý F0: approve, suspend, view |
+| `commission_records` | affiliate | View commissions, batch payment |
+| `payment_batches` | affiliate | Track payment history |
+| `lock_payment_settings` | affiliate | Configure lock period, payment day |
+| `commission_settings` | affiliate | Configure commission rates |
+| `f0_tiers` | affiliate | Configure tier requirements & benefits |
+| `affiliate_campaign_settings` | affiliate | Manage campaigns |
+| `notifications` | affiliate | Send announcements |
+| `voucher_affiliate_tracking` | affiliate | Track voucher usage |
+| `f1_customer_assignments` | affiliate | F0-F1 relationships |
+
+### 2.2 VIEWs hiện có (Schema `api`)
+| VIEW | Description | Có thể dùng cho Admin |
+|------|-------------|----------------------|
+| `f0_partners` | F0 partner info | ✅ |
+| `commission_records` | Commission records | ✅ |
+| `f1_customers_summary` | F1 summary per F0 | ✅ |
+| `f1_customer_orders` | F1 order history | ✅ |
+| `notifications` | Notifications | ✅ |
+| `f0_tiers` | Tier config | ✅ |
+
+### 2.3 VIEWs cần tạo thêm cho Admin
+```sql
+-- api.admin_system_stats: Overall system stats
+-- api.admin_f0_overview: F0 list with commission stats
+-- api.admin_commission_by_month: Commission grouped by month
+-- api.admin_payment_batches: Payment batch history
+```
+
+---
+
+## 3. COMMISSION FLOW (v16 Lock System)
+
+### 3.1 Status Flow
+```
+pending (15 ngày) → locked (chốt) → paid (thanh toán)
+     ↓                                    ↑
+ cancelled                         Admin batch pay
+(nếu hủy đơn)                    (ngày 5 mỗi tháng)
+```
+
+### 3.2 Key Business Rules
+- **Lock Period**: 15 ngày sau khi invoice fully paid
+- **Tier Calculation**: Chỉ count `locked` + `paid` (NOT pending)
+- **Payment Day**: Ngày 5 mỗi tháng
+- **Cancellation**: Pending có thể cancel, Locked thì giữ commission
+
+### 3.3 Edge Functions liên quan
+| Function | Version | Description |
+|----------|---------|-------------|
+| `webhook-affiliate-check-voucher-invoice` | v10 | Xử lý invoice webhook, tính commission |
+| `cron-lock-commissions` | v1 | Daily job lock pending → locked |
+| `admin-process-payment-batch` | v1 | Batch payment locked → paid |
+| `get-f0-dashboard-stats` | v16 | F0 dashboard với lock system |
+| `get-f0-my-customers` | v2 | F1 list với lock fields |
+| `get-f1-customer-detail` | v2 | F1 detail với order lock status |
+
+---
+
+## 4. ADMIN PORTAL STRUCTURE (NEW PROJECT)
+
+### 4.1 Tech Stack (Recommend same as F0)
+```
+- React 19 + TypeScript
+- Vite
+- Tailwind CSS
+- Supabase JS Client
+- React Router DOM
+- Lucide React (icons)
+- shadcn/ui components
+```
+
+### 4.2 Project Structure
+```
+admin-affiliate/
+├── src/
+│   ├── components/
+│   │   ├── layout/
+│   │   │   └── AdminLayout.tsx      # Sidebar + Header
+│   │   └── ui/                      # Copy từ F0 hoặc shadcn fresh
+│   ├── lib/
+│   │   ├── supabase.ts              # Same config, schema: 'api'
+│   │   ├── utils.ts                 # Format currency, date...
+│   │   └── constants.ts             # Tier colors, status labels
+│   ├── pages/
+│   │   ├── auth/
+│   │   │   └── LoginPage.tsx
+│   │   ├── DashboardPage.tsx
+│   │   ├── F0PartnersPage.tsx
+│   │   ├── F0DetailPage.tsx
+│   │   ├── CommissionsPage.tsx
+│   │   ├── PaymentPage.tsx
+│   │   ├── CampaignsPage.tsx
+│   │   └── SettingsPage.tsx
+│   ├── services/
+│   │   └── adminService.ts          # All admin API calls
+│   ├── types/
+│   │   └── admin.ts                 # Admin-specific types
+│   ├── App.tsx
+│   └── main.tsx
+├── .env                             # Same Supabase credentials
+├── package.json
+├── vite.config.ts
+└── tailwind.config.js
+```
+
+### 4.3 Routes
+```
+/auth/login                → Admin login
+/dashboard                 → System overview
+/f0-partners               → F0 list
+/f0-partners/:id           → F0 detail
+/commissions               → Commission list
+/commissions/payment       → Batch payment
+/campaigns                 → Campaign management
+/settings                  → System settings
+/settings/tiers            → Tier configuration
+/settings/commission       → Commission rate config
+```
+
+---
+
+## 5. PHASE IMPLEMENTATION
+
+### Phase 1: Project Setup & Auth (2-3 days)
+**Goal:** Admin có thể login và xem dashboard cơ bản
+
+#### Tasks:
+- [ ] Init new Vite + React + TypeScript project
+- [ ] Setup Tailwind CSS
+- [ ] Copy/setup shadcn/ui components từ F0
+- [ ] Setup Supabase client (same project ID)
+- [ ] Create AdminLayout with sidebar
+- [ ] Setup Supabase Auth for admin
+- [ ] Create LoginPage
+- [ ] Create basic DashboardPage
+
+#### Database:
+- [ ] Create admin user in Supabase Auth với `user_metadata.role = 'admin'`
+- [ ] Create VIEW `api.admin_system_stats`
+
+#### Deliverables:
+- Admin login working
+- Dashboard showing basic stats
+
+---
+
+### Phase 2: F0 Management (3-4 days)
+**Goal:** Admin có thể xem và quản lý F0 partners
+
+#### Tasks:
+- [ ] Create F0PartnersPage với table + filters
+- [ ] Create F0DetailPage với:
+  - Profile info
+  - Bank info (readonly)
+  - Commission history (copy UI từ F0 MyCustomers)
+  - F1 customers list
+- [ ] Implement Approve/Suspend F0
+- [ ] Send notification on approve/suspend
+
+#### Edge Functions:
+- [ ] `admin-list-f0-partners` - List với pagination, filters
+- [ ] `admin-get-f0-detail` - Detail với commissions
+- [ ] `admin-approve-f0` - Approve pending F0
+- [ ] `admin-suspend-f0` - Suspend F0
+
+#### Database:
+- [ ] Create VIEW `api.admin_f0_overview`
+
+#### Deliverables:
+- F0 list với search, filter by status/tier
+- F0 detail page
+- Approve/Suspend functionality
+
+---
+
+### Phase 3: Commission & Payment (3-4 days)
+**Goal:** Admin có thể xem commissions và xử lý thanh toán
+
+#### Tasks:
+- [ ] Create CommissionsPage với:
+  - Summary cards (pending/locked/paid by month)
+  - Table với all commissions
+  - Filters: status, month, F0, F1 phone
+- [ ] Create PaymentPage với:
+  - Month selector
+  - Preview F0 list với amounts
+  - Confirm & process button
+  - Result summary
+- [ ] Payment history section
+
+#### Edge Functions:
+- [ ] `admin-list-commissions` - List với filters
+- [ ] Fix `admin-process-payment-batch` (SQL injection vulnerability)
+- [ ] `admin-list-payment-batches` - Payment history
+- [ ] `admin-get-payment-preview` - Preview before payment
+
+#### Database:
+- [ ] Create VIEW `api.admin_commission_by_month`
+- [ ] Create VIEW `api.admin_payment_batches`
+
+#### Deliverables:
+- Commission list với filters
+- Batch payment flow
+- Payment history
+
+---
+
+### Phase 4: Campaign Management (2-3 days)
+**Goal:** Admin có thể quản lý campaigns
+
+#### Tasks:
+- [ ] Create CampaignsPage với:
+  - Campaign list với voucher stats
+  - Toggle active/inactive
+  - Edit campaign settings
+- [ ] Campaign edit modal
+
+#### Edge Functions:
+- [ ] `admin-list-campaigns`
+- [ ] `admin-update-campaign`
+
+#### Deliverables:
+- Campaign list
+- Campaign edit functionality
+
+---
+
+### Phase 5: System Settings (2-3 days)
+**Goal:** Admin có thể cấu hình hệ thống
+
+#### Tasks:
+- [ ] Create SettingsPage với:
+  - Lock period (days)
+  - Payment day of month
+- [ ] Create TierSettingsPage với:
+  - Tier list với requirements & benefits
+  - Edit tier modal
+- [ ] Create CommissionSettingsPage với:
+  - Basic rate
+  - First order bonus
+  - Commission rules
+
+#### Edge Functions:
+- [ ] `admin-get-settings`
+- [ ] `admin-update-lock-settings`
+- [ ] `admin-update-tier`
+- [ ] `admin-update-commission-settings`
+
+#### Deliverables:
+- Lock & payment settings
+- Tier configuration
+- Commission rate configuration
+
+---
+
+### Phase 6: Advanced Features (3-4 days)
+**Goal:** Các tính năng nâng cao
+
+#### Tasks:
+- [ ] Announcements - Send to all/selected F0s
+- [ ] Export commissions to CSV
+- [ ] Audit log page
+
+#### Edge Functions:
+- [ ] `admin-send-announcement`
+- [ ] `admin-export-data`
+
+#### Deliverables:
+- Announcement system
+- Export functionality
+- Audit log
+
+---
+
+## 6. UI/UX REFERENCE FROM F0 PORTAL
+
+### 6.1 Commission Status Colors (Reuse)
 ```typescript
-import { supabase } from '@/lib/supabase';
-
-async getMyCustomers(f0_id: string, options: {...}): Promise<F1CustomerListResponse> {
-  // 1. Query customers with pagination
-  let query = supabase
-    .from('f1_customers_summary')
-    .select('*', { count: 'exact' })
-    .eq('f0_id', f0_id)
-    .eq('is_active', true);
-
-  if (options.search_phone?.trim()) {
-    query = query.ilike('f1_phone', `%${options.search_phone.trim()}%`);
+// From F0 MyCustomersPage.tsx
+const getStatusBadge = (status: string, label: string, daysUntilLock?: number) => {
+  switch (status) {
+    case 'paid':      // Green - CheckCircle2 icon
+    case 'locked':    // Purple - Lock icon
+    case 'pending':   // Orange - Clock icon + days countdown
+    case 'cancelled': // Red - XCircle icon
   }
+};
+```
 
-  const offset = ((options.page || 1) - 1) * (options.limit || 20);
-  query = query
-    .order('assigned_at', { ascending: false })
-    .range(offset, offset + (options.limit || 20) - 1);
+### 6.2 Commission Breakdown Cards (Reuse)
+```
+┌─────────────┬─────────────┬─────────────┬─────────────┐
+│  Chờ chốt   │  Đã chốt    │  Đã nhận    │   Tổng      │
+│  (orange)   │  (purple)   │  (green)    │  (gray)     │
+│  pending    │  locked     │  paid       │  total      │
+└─────────────┴─────────────┴─────────────┴─────────────┘
+```
 
-  const { data: customers, error, count } = await query;
+### 6.3 Tier Badge Colors (From constants.ts)
+```typescript
+const tierConfigs = {
+  BRONZE:   { color: '#CD7F32', gradient: 'from-amber-600 to-amber-800' },
+  SILVER:   { color: '#C0C0C0', gradient: 'from-gray-400 to-gray-600' },
+  GOLD:     { color: '#FFD700', gradient: 'from-yellow-400 to-yellow-600' },
+  PLATINUM: { color: '#E5E4E2', gradient: 'from-slate-300 to-slate-500' },
+  DIAMOND:  { color: '#B9F2FF', gradient: 'from-cyan-300 to-blue-500' },
+};
+```
 
-  // 2. Calculate summary (separate query for all customers)
-  const { data: summaryData } = await supabase
-    .from('f1_customers_summary')
-    .select('total_orders, total_revenue, total_commission')
-    .eq('f0_id', f0_id)
-    .eq('is_active', true);
+### 6.4 Currency & Date Formatting (Reuse)
+```typescript
+// Format currency: 1,500,000đ
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat('vi-VN').format(amount) + 'đ';
 
-  const summary = {
-    total_f1: count || 0,
-    total_orders: summaryData?.reduce((sum, c) => sum + (c.total_orders || 0), 0) || 0,
-    total_revenue: summaryData?.reduce((sum, c) => sum + Number(c.total_revenue || 0), 0) || 0,
-    total_commission: summaryData?.reduce((sum, c) => sum + Number(c.total_commission || 0), 0) || 0
-  };
+// Format date: 02/12/2024 14:30
+const formatDateTime = (date: string) =>
+  new Date(date).toLocaleString('vi-VN');
+```
 
-  return {
-    success: true,
-    data: {
-      summary,
-      customers: formatCustomers(customers),
-      pagination: { page, limit, total: count, total_pages: Math.ceil(count / limit) }
-    }
-  };
+---
+
+## 7. EDGE FUNCTIONS SUMMARY
+
+### 7.1 Existing (Shared with F0)
+| Function | Can Admin Use? |
+|----------|---------------|
+| `get-f0-dashboard-stats` | ✅ For F0 detail page |
+| `get-f0-my-customers` | ✅ For F0's F1 list |
+| `get-f1-customer-detail` | ✅ For F1 orders |
+
+### 7.2 New Admin Functions
+| Function | Description |
+|----------|-------------|
+| `admin-list-f0-partners` | List F0 với filters |
+| `admin-get-f0-detail` | F0 detail với commissions |
+| `admin-approve-f0` | Approve pending F0 |
+| `admin-suspend-f0` | Suspend F0 |
+| `admin-list-commissions` | List all commissions |
+| `admin-process-payment-batch` | (Exists - fix SQL injection) |
+| `admin-list-payment-batches` | Payment history |
+| `admin-get-payment-preview` | Preview before pay |
+| `admin-list-campaigns` | List campaigns |
+| `admin-update-campaign` | Update campaign |
+| `admin-get-settings` | Get all settings |
+| `admin-update-lock-settings` | Update lock config |
+| `admin-update-tier` | Update tier |
+| `admin-update-commission-settings` | Update rates |
+| `admin-send-announcement` | Send notifications |
+| `admin-export-data` | Export to CSV |
+
+---
+
+## 8. SECURITY
+
+### 8.1 Admin Authentication
+```typescript
+// Login with Supabase Auth
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'admin@example.com',
+  password: 'secure_password'
+});
+
+// Check admin role
+const isAdmin = data.user?.user_metadata?.role === 'admin';
+```
+
+### 8.2 Edge Function Authorization
+```typescript
+// In admin-* functions
+const authHeader = req.headers.get('Authorization');
+const token = authHeader?.replace('Bearer ', '');
+
+const { data: { user }, error } = await supabase.auth.getUser(token);
+if (!user || user.user_metadata?.role !== 'admin') {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
 }
 ```
 
+### 8.3 Admin Functions Deploy
+```bash
+# Admin functions CẦN verify_jwt = true
+npx supabase functions deploy admin-list-f0-partners
+# (default is verify_jwt = true, không cần --no-verify-jwt)
+```
+
 ---
 
-#### 3.2 MyCustomersPage - Thay `get-f1-customer-detail`
+## 9. ENV CONFIGURATION
 
-**File:** `src/services/f1CustomerService.ts`
+### 9.1 Admin Project .env
+```env
+# Same as F0 Portal
+VITE_SUPABASE_URL=https://kcirpjxbjqagrqrjfldu.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=eyJ...
 
-**After:**
+# Optional: Different anon key for admin (if created)
+# VITE_SUPABASE_ADMIN_KEY=eyJ...
+```
+
+### 9.2 Supabase Client Config
 ```typescript
-async getCustomerDetail(f0_id: string, f1_phone: string): Promise<F1CustomerDetailResponse> {
-  // Query orders directly from VIEW
-  const { data: orders, error } = await supabase
-    .from('f1_customer_orders')
-    .select('*')
-    .eq('f0_id', f0_id)
-    .eq('f1_phone', f1_phone)
-    .order('invoice_date', { ascending: false });
+// src/lib/supabase.ts (same as F0)
+import { createClient } from '@supabase/supabase-js';
 
-  if (error) {
-    return { success: false, error: error.message };
+export const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  {
+    db: { schema: 'api' }  // IMPORTANT: Same schema
   }
-
-  return {
-    success: true,
-    data: {
-      orders: formatOrders(orders || [])
-    }
-  };
-}
+);
 ```
 
 ---
 
-#### 3.3 NotificationsPage - Thay GET `manage-notifications`
+## 10. TIMELINE
 
-**File:** `src/pages/f0/NotificationsPage.tsx`
+| Phase | Duration | Priority |
+|-------|----------|----------|
+| Phase 1: Setup & Auth | 2-3 days | HIGH |
+| Phase 2: F0 Management | 3-4 days | HIGH |
+| Phase 3: Commission & Payment | 3-4 days | HIGH |
+| Phase 4: Campaign Management | 2-3 days | MEDIUM |
+| Phase 5: System Settings | 2-3 days | MEDIUM |
+| Phase 6: Advanced Features | 3-4 days | LOW |
 
-**After:**
-```typescript
-const fetchNotifications = useCallback(async (showRefreshing = false) => {
-  const { data, error } = await supabase
-    .from('notifications')
-    .select('*')
-    .eq('f0_id', f0User.id)
-    .order('created_at', { ascending: false })
-    .limit(100);
-
-  if (!error) {
-    let filtered = data || [];
-    if (filter === 'unread') {
-      filtered = filtered.filter(n => !n.is_read);
-    }
-    setNotifications(filtered);
-  }
-}, [filter]);
-```
-
-**Note:** Giữ Edge Function cho mark_read, mark_all_read, delete vì cần service_role permission.
+**Total Estimate:** 15-21 days
 
 ---
 
-### Phase 2: Frontend Optimizations
+## 11. CHECKLIST
 
-#### 3.4 React.memo cho Customer Rows
+### Phase 1: Setup & Auth
+- [ ] Init Vite + React + TS project
+- [ ] Setup Tailwind + shadcn/ui
+- [ ] Setup Supabase client
+- [ ] Create admin user in Supabase
+- [ ] AdminLayout.tsx
+- [ ] LoginPage.tsx
+- [ ] DashboardPage.tsx
+- [ ] VIEW `api.admin_system_stats`
 
-**File:** `src/pages/f0/MyCustomersPage.tsx`
+### Phase 2: F0 Management
+- [ ] VIEW `api.admin_f0_overview`
+- [ ] `admin-list-f0-partners` function
+- [ ] `admin-get-f0-detail` function
+- [ ] `admin-approve-f0` function
+- [ ] `admin-suspend-f0` function
+- [ ] F0PartnersPage.tsx
+- [ ] F0DetailPage.tsx
 
-```typescript
-const CustomerRow = React.memo(({ customer, expanded, onToggle, orders, loadingOrders }) => {
-  // ... render logic
-}, (prevProps, nextProps) => {
-  return prevProps.customer.f1_phone === nextProps.customer.f1_phone
-    && prevProps.expanded === nextProps.expanded
-    && prevProps.orders === nextProps.orders;
-});
-```
+### Phase 3: Commission & Payment
+- [ ] VIEW `api.admin_commission_by_month`
+- [ ] VIEW `api.admin_payment_batches`
+- [ ] `admin-list-commissions` function
+- [ ] Fix `admin-process-payment-batch`
+- [ ] `admin-list-payment-batches` function
+- [ ] CommissionsPage.tsx
+- [ ] PaymentPage.tsx
 
-#### 3.5 useMemo cho expensive calculations
-
-```typescript
-const summaryStats = useMemo(() => ({
-  totalF1: summary.total_f1,
-  totalRevenue: formatCurrency(summary.total_revenue),
-  totalCommission: formatCurrency(summary.total_commission)
-}), [summary]);
-```
-
-#### 3.6 Cache với React Query (Optional - Thêm dependency)
-
-```typescript
-// Nếu muốn cache giữa các lần navigate
-import { useQuery } from '@tanstack/react-query';
-
-const { data, isLoading } = useQuery({
-  queryKey: ['f1-customers', f0_id, page, searchPhone],
-  queryFn: () => f1CustomerService.getMyCustomers(f0_id, { page, search_phone: searchPhone }),
-  staleTime: 30000, // Cache 30 giây
-});
-```
+### Phase 4-6: TBD
 
 ---
 
-## 4. KẾT QUẢ DỰ KIẾN
-
-| Metric | Before | After Phase 1 | After Phase 2 |
-|--------|--------|---------------|---------------|
-| MyCustomersPage load | 1-3s | 200-500ms | 150-400ms |
-| Customer detail expand | 500-1500ms | 100-300ms | 100-300ms |
-| NotificationsPage load | 500-1500ms | 100-300ms | 100-300ms |
-| Cold start overhead | 500-2000ms | 0ms | 0ms |
-
----
-
-## 5. CHECKLIST TRIỂN KHAI
-
-### Phase 1 (Ưu tiên cao) ✅ COMPLETED (2025-12-02)
-- [x] **3.1** Update `f1CustomerService.getMyCustomers()` → Direct query
-- [x] **3.2** Update `f1CustomerService.getCustomerDetail()` → Direct query
-- [x] **3.3** Update `NotificationsPage.fetchNotifications()` → Direct query (GET only)
-- [x] Test tất cả các trang sau khi thay đổi
-- [x] Verify RLS permissions cho `anon` role (đã GRANT trước đó)
-
-### Phase 2 (Ưu tiên trung bình) ✅ COMPLETED (2025-12-02)
-- [x] **3.4** Add React.memo cho CustomerRow + OrderRow
-- [x] **3.5** Add useMemo cho summary calculations
-- [ ] **3.6** (Optional) Integrate React Query for caching
-
-### Verification
-- [x] Test MyCustomersPage: Load, search, pagination, expand
-- [x] Test NotificationsPage: Load, mark read, delete
-- [x] TypeScript check passed - no errors
-- [x] Check console không có errors
-
----
-
-## 6. RỦI RO VÀ MITIGATION
-
-| Rủi ro | Xác suất | Mitigation |
-|--------|----------|------------|
-| RLS block direct query | Trung bình | Verify GRANT SELECT permissions trước |
-| Missing data formatting | Thấp | Copy exact format từ Edge Function |
-| Breaking existing logic | Thấp | Test kỹ từng page |
-
----
-
-## 7. GHI CHÚ QUAN TRỌNG
-
-1. **Supabase Client đã config schema `api`** trong `src/lib/supabase.ts`:
-   ```typescript
-   export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-     db: { schema: 'api' }
-   });
-   ```
-
-2. **Permissions đã được grant** cho các VIEWs (đã fix trước đó):
-   ```sql
-   GRANT SELECT ON api.f1_customers_summary TO service_role, anon, authenticated;
-   GRANT SELECT ON api.f1_customer_orders TO service_role, anon, authenticated;
-   ```
-
-3. **Edge Functions KHÔNG XÓA** - Giữ lại để:
-   - Backup nếu direct query gặp vấn đề
-   - Dùng cho các operations cần service_role (POST/PUT/DELETE)
-
----
-
-*Plan created: 2025-12-01*
-*Status: Phase 1 & Phase 2 COMPLETED (2025-12-02)*
+*Plan created: 2025-12-02*
+*Status: Planning Complete - Ready for New Project Init*
+*Note: This is a SEPARATE PROJECT from F0 Portal, sharing same Supabase backend*

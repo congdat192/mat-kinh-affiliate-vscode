@@ -11,6 +11,10 @@ import {
   Award,
   Loader2,
   RefreshCw,
+  Clock,
+  Lock,
+  CheckCircle2,
+  Calendar,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +40,14 @@ interface DashboardStats {
   pendingWithdrawals: number;
   completedWithdrawals: number;
   totalF1Revenue: number; // Total revenue from F1 customers
+  // v16: Lock system commission stats
+  pendingCommission: number;   // Waiting for lock period
+  lockedCommission: number;    // Locked, ready for payment
+  cancelledCommission: number; // Cancelled before lock
+  pendingCount: number;
+  lockedCount: number;
+  paidCount: number;
+  cancelledCount: number;
 }
 
 interface TierInfo {
@@ -248,12 +260,12 @@ const DashboardPage = () => {
     ? (f1Progress * 0.5) + (f1RevenueProgress * 0.5)
     : 100;
 
-  // Statistics cards data
+  // Statistics cards data - Updated for Lock System v16
   const statsCards = [
     {
       title: 'Tổng giới thiệu',
       value: stats.totalReferrals,
-      subValue: `${stats.referralsThisQuarter} quý này`,
+      subValue: `${stats.referralsThisQuarter} đủ điều kiện`,
       icon: Users,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
@@ -267,20 +279,18 @@ const DashboardPage = () => {
       bgColor: 'bg-green-50',
     },
     {
-      title: 'Tổng hoa hồng',
-      value: formatCurrency(stats.totalCommission),
-      subValue: `Đã nhận: ${formatCurrency(stats.paidCommission)}`,
-      icon: DollarSign,
-      color: 'text-yellow-600',
-      bgColor: 'bg-yellow-50',
+      title: 'Chờ chốt',
+      value: formatCurrency(stats.pendingCommission || 0),
+      subValue: `${stats.pendingCount || 0} đơn hàng`,
+      icon: Clock,
+      color: 'text-orange-600',
+      bgColor: 'bg-orange-50',
     },
     {
-      title: 'Số dư khả dụng',
-      value: formatCurrency(stats.availableBalance),
-      subValue: stats.pendingWithdrawals > 0
-        ? `Đang rút: ${formatCurrency(stats.pendingWithdrawals)}`
-        : 'Có thể rút',
-      icon: Wallet,
+      title: 'Đã chốt (chờ TT)',
+      value: formatCurrency(stats.lockedCommission || 0),
+      subValue: `${stats.lockedCount || 0} đơn hàng`,
+      icon: Lock,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
     },
@@ -335,21 +345,23 @@ const DashboardPage = () => {
             </div>
           </div>
 
-          {/* Quick Stats Summary */}
+          {/* Quick Stats Summary - Lock System v16 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-primary-400">
             <div>
-              <p className="text-primary-100 text-xs">Giới thiệu</p>
-              <p className="text-2xl font-bold">{stats.totalReferrals}</p>
+              <p className="text-primary-100 text-xs">Chờ chốt</p>
+              <p className="text-xl font-bold">{formatCurrency(stats.pendingCommission || 0)}</p>
             </div>
             <div>
-              <p className="text-primary-100 text-xs">Hoạt động</p>
-              <p className="text-2xl font-bold">{stats.activeCustomers}</p>
+              <p className="text-primary-100 text-xs">Đã chốt</p>
+              <p className="text-xl font-bold">{formatCurrency(stats.lockedCommission || 0)}</p>
             </div>
-            <div className="col-span-2 md:col-span-2">
-              <p className="text-primary-100 text-xs">Số dư khả dụng</p>
-              <p className="text-xl md:text-2xl font-bold">
-                {formatCurrency(stats.availableBalance)}
-              </p>
+            <div>
+              <p className="text-primary-100 text-xs">Đã nhận</p>
+              <p className="text-xl font-bold">{formatCurrency(stats.paidCommission || 0)}</p>
+            </div>
+            <div>
+              <p className="text-primary-100 text-xs">Tổng HH</p>
+              <p className="text-xl font-bold">{formatCurrency(stats.totalCommission || 0)}</p>
             </div>
           </div>
         </div>
@@ -710,6 +722,93 @@ const DashboardPage = () => {
           </CardContent>
         </Card>
 
+        {/* Commission Status Card - Lock System v16 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-green-600" />
+              Tình trạng hoa hồng
+            </CardTitle>
+            <CardDescription>
+              Hoa hồng được chốt sau 15 ngày và thanh toán vào ngày 5 mỗi tháng
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* Pending Commission */}
+              <div className="bg-orange-50 rounded-lg p-4 border border-orange-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-orange-600" />
+                  <span className="text-sm font-medium text-orange-700">Chờ chốt</span>
+                </div>
+                <p className="text-2xl font-bold text-orange-600">
+                  {formatCurrency(stats.pendingCommission || 0)}
+                </p>
+                <p className="text-xs text-orange-600 mt-1">
+                  {stats.pendingCount || 0} đơn hàng
+                </p>
+              </div>
+
+              {/* Locked Commission */}
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-4 h-4 text-purple-600" />
+                  <span className="text-sm font-medium text-purple-700">Đã chốt</span>
+                </div>
+                <p className="text-2xl font-bold text-purple-600">
+                  {formatCurrency(stats.lockedCommission || 0)}
+                </p>
+                <p className="text-xs text-purple-600 mt-1">
+                  {stats.lockedCount || 0} đơn - chờ thanh toán
+                </p>
+              </div>
+
+              {/* Paid Commission */}
+              <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-700">Đã nhận</span>
+                </div>
+                <p className="text-2xl font-bold text-green-600">
+                  {formatCurrency(stats.paidCommission || 0)}
+                </p>
+                <p className="text-xs text-green-600 mt-1">
+                  {stats.paidCount || 0} đơn hàng
+                </p>
+              </div>
+
+              {/* Total Commission */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <DollarSign className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-700">Tổng cộng</span>
+                </div>
+                <p className="text-2xl font-bold text-blue-600">
+                  {formatCurrency(stats.totalCommission || 0)}
+                </p>
+                <p className="text-xs text-blue-600 mt-1">
+                  {(stats.pendingCount || 0) + (stats.lockedCount || 0) + (stats.paidCount || 0)} đơn hàng
+                </p>
+              </div>
+            </div>
+
+            {/* Info Box */}
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex items-start gap-2">
+                <Calendar className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-gray-600">
+                  <p className="font-medium text-gray-700">Cách tính hoa hồng</p>
+                  <ul className="mt-1 space-y-1">
+                    <li>• <span className="text-orange-600 font-medium">Chờ chốt:</span> Hoa hồng đang trong 15 ngày chờ xác nhận</li>
+                    <li>• <span className="text-purple-600 font-medium">Đã chốt:</span> Hoa hồng đã được xác nhận, chờ thanh toán vào ngày 5 tháng sau</li>
+                    <li>• <span className="text-green-600 font-medium">Đã nhận:</span> Hoa hồng đã được chuyển vào tài khoản của bạn</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Quick Actions */}
         <Card>
           <CardHeader>
@@ -755,16 +854,16 @@ const DashboardPage = () => {
               <Button
                 className="h-auto py-4 flex-col items-start gap-2"
                 variant="outline"
-                onClick={() => navigate('/f0/withdrawal')}
+                onClick={() => navigate('/f0/my-customers')}
               >
                 <div className="flex items-center gap-2 w-full">
                   <div className="bg-purple-50 p-2 rounded-lg">
-                    <CreditCard className="w-5 h-5 text-purple-600" />
+                    <Users className="w-5 h-5 text-purple-600" />
                   </div>
-                  <span className="font-semibold">Yêu cầu rút tiền</span>
+                  <span className="font-semibold">Khách hàng của tôi</span>
                 </div>
                 <p className="text-xs text-gray-500 text-left">
-                  Rút hoa hồng về tài khoản ngân hàng
+                  Xem danh sách và trạng thái đơn hàng
                 </p>
               </Button>
             </div>

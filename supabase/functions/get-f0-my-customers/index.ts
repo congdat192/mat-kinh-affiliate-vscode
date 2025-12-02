@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-console.info('get-f0-my-customers v1 - List F1 customers for F0');
+console.info('get-f0-my-customers v2 - List F1 customers for F0 (v16 lock system: locked_commission, cancelled_commission)');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
       summary.total_commission = summaryData.reduce((sum, c) => sum + Number(c.total_commission || 0), 0);
     }
 
-    // Format response
+    // Format response - v2: Added lock system fields
     const formattedCustomers = (customers || []).map(c => ({
       assignment_id: c.assignment_id,
       f1_phone: c.f1_phone,
@@ -99,6 +99,9 @@ Deno.serve(async (req) => {
       total_commission: Number(c.total_commission || 0),
       paid_commission: Number(c.paid_commission || 0),
       pending_commission: Number(c.pending_commission || 0),
+      // v16: Lock system fields
+      locked_commission: Number(c.locked_commission || 0),
+      cancelled_commission: Number(c.cancelled_commission || 0),
       last_order_date: c.last_order_date,
       last_order_code: c.last_order_code,
       has_valid_order: c.has_valid_order || false

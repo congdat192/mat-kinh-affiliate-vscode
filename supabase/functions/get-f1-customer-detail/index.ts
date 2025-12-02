@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-console.info('get-f1-customer-detail v1 - Get F1 customer detail with order history');
+console.info('get-f1-customer-detail v2 - Get F1 customer detail with order history (v16 lock system)');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       console.error('[CustomerDetail] Error fetching orders:', ordersError.message);
     }
 
-    // Format customer data
+    // Format customer data - v2: Added lock system fields
     const formattedCustomer = {
       assignment_id: customer.assignment_id,
       f1_phone: customer.f1_phone,
@@ -81,31 +81,50 @@ Deno.serve(async (req) => {
       total_commission: Number(customer.total_commission || 0),
       paid_commission: Number(customer.paid_commission || 0),
       pending_commission: Number(customer.pending_commission || 0),
+      // v16: Lock system fields
+      locked_commission: Number(customer.locked_commission || 0),
+      cancelled_commission: Number(customer.cancelled_commission || 0),
       last_order_date: customer.last_order_date,
       last_order_code: customer.last_order_code,
       has_valid_order: customer.has_valid_order || false
     };
 
-    // Format orders data
-    const formattedOrders = (orders || []).map(o => ({
-      id: o.id,
-      voucher_code: o.voucher_code,
-      invoice_code: o.invoice_code,
-      invoice_amount: Number(o.invoice_amount || 0),
-      invoice_date: o.invoice_date,
-      invoice_status: o.invoice_status,
-      basic_amount: Number(o.basic_amount || 0),
-      first_order_amount: Number(o.first_order_amount || 0),
-      tier_bonus_amount: Number(o.tier_bonus_amount || 0),
-      total_commission: Number(o.total_commission || 0),
-      commission_status: o.commission_status,
-      status_label: o.status_label,
-      order_type: o.order_type,
-      is_lifetime_commission: o.is_lifetime_commission,
-      invoice_cancelled_at: o.invoice_cancelled_at,
-      paid_at: o.paid_at,
-      created_at: o.created_at
-    }));
+    // Format orders data - v2: Added lock system fields
+    const now = new Date();
+    const formattedOrders = (orders || []).map(o => {
+      // Calculate days until lock
+      let daysUntilLock: number | null = null;
+      if (o.lock_date && o.commission_status === 'pending') {
+        const lockDate = new Date(o.lock_date);
+        const diffTime = lockDate.getTime() - now.getTime();
+        daysUntilLock = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+      }
+
+      return {
+        id: o.id,
+        voucher_code: o.voucher_code,
+        invoice_code: o.invoice_code,
+        invoice_amount: Number(o.invoice_amount || 0),
+        invoice_date: o.invoice_date,
+        invoice_status: o.invoice_status,
+        basic_amount: Number(o.basic_amount || 0),
+        first_order_amount: Number(o.first_order_amount || 0),
+        tier_bonus_amount: Number(o.tier_bonus_amount || 0),
+        total_commission: Number(o.total_commission || 0),
+        commission_status: o.commission_status,
+        status_label: o.status_label,
+        order_type: o.order_type,
+        is_lifetime_commission: o.is_lifetime_commission,
+        invoice_cancelled_at: o.invoice_cancelled_at,
+        paid_at: o.paid_at,
+        // v16: Lock system fields
+        qualified_at: o.qualified_at || null,
+        lock_date: o.lock_date || null,
+        locked_at: o.locked_at || null,
+        days_until_lock: daysUntilLock,
+        created_at: o.created_at
+      };
+    });
 
     console.log(`[CustomerDetail] Found customer ${f1_phone} with ${formattedOrders.length} orders`);
 

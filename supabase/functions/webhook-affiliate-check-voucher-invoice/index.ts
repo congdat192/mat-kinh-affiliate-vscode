@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-console.info('Webhook affiliate check voucher invoice started - v9 (Auto recalculate F0 tier after commission)');
+console.info('Webhook affiliate check voucher invoice started - v10 (Lock period system: pending → locked → paid)');
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -38,6 +38,39 @@ function normalizePhone(phone: string) {
   }
   return normalized;
 }
+
+// ============================================
+// GET LOCK PERIOD SETTINGS
+// ============================================
+async function getLockPeriodSettings(supabase: any): Promise<{ lock_period_days: number }> {
+  try {
+    const { data, error } = await supabase
+      .from('lock_payment_settings')
+      .select('lock_period_days')
+      .eq('is_active', true)
+      .single();
+
+    if (error || !data) {
+      console.log('[Lock Settings] ⚠️ Using default lock_period_days = 15');
+      return { lock_period_days: 15 };
+    }
+
+    console.log(`[Lock Settings] ✅ lock_period_days = ${data.lock_period_days}`);
+    return { lock_period_days: data.lock_period_days };
+  } catch (e) {
+    console.error('[Lock Settings] ❌ Error fetching settings:', e);
+    return { lock_period_days: 15 };
+  }
+}
+
+// ============================================
+// CALCULATE LOCK DATE
+// ============================================
+function calculateLockDate(qualifiedAt: Date, lockPeriodDays: number): Date {
+  const lockDate = new Date(qualifiedAt);
+  lockDate.setDate(lockDate.getDate() + lockPeriodDays);
+  return lockDate;
+}
 // ============================================
 // RECALCULATE F0 TIER
 // ============================================
@@ -58,13 +91,12 @@ async function recalculateF0Tier(supabase: any, f0Id: string, f0Code: string) {
     }
 
     // Step 2: Calculate F0's current stats from commission_records
-    // Only count commissions that are valid (available or paid)
+    // Only count commissions that are LOCKED or PAID (not pending - pending don't count for EXP)
     const { data: stats, error: statsError } = await supabase
       .from('commission_records')
       .select('id, invoice_amount, f1_customer_id')
       .eq('f0_id', f0Id)
-      .in('status', ['available', 'paid'])
-      .is('invoice_cancelled_at', null);
+      .in('status', ['locked', 'paid']);
 
     if (statsError) {
       console.error('[Tier] ❌ Error fetching commission stats:', statsError.message);
@@ -213,7 +245,11 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
   console.log(`[Cancellation]    Paid at: ${commission.paid_at}`);
   console.log(`[Cancellation]    Total: ${commission.total_commission}`);
 
-  // Step 2: Check if commission was already paid
+  // Step 2: Check commission status - NEW LOCK SYSTEM
+  // pending: Chưa chốt → BỊ HỦY
+  // locked/paid: Đã chốt → GIỮ NGUYÊN
+  const isPending = commission.status === 'pending';
+  const isLockedOrPaid = commission.status === 'locked' || commission.status === 'paid';
   const wasPaid = commission.status === 'paid' && commission.paid_at != null;
 
   // Step 3: Check if F1 has other valid orders (for F1 count adjustment)
@@ -230,6 +266,14 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
   const f1Adjustment = f1WasUnique ? -1 : 0;
 
   console.log(`[Cancellation] F1 unique (no other orders): ${f1WasUnique}`);
+  console.log(`[Cancellation] isPending: ${isPending}, isLockedOrPaid: ${isLockedOrPaid}`);
+
+  // ============================================
+  // NEW LOCK SYSTEM: 3 scenarios
+  // A: PAID → Keep commission (already paid out)
+  // B: LOCKED → Keep commission (already locked, EXP counted)
+  // C: PENDING → Cancel commission (not yet locked)
+  // ============================================
 
   if (wasPaid) {
     // ============================================
@@ -317,11 +361,75 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       f1_adjustment: f1Adjustment
     };
 
+  } else if (isLockedOrPaid) {
+    // ============================================
+    // SCENARIO B: Commission is LOCKED - KEEP commission (already locked, EXP counted)
+    // ============================================
+    console.log('[Cancellation] 🔒 Commission is LOCKED - Keeping commission (đã chốt, không ảnh hưởng)...');
+
+    // Update commission_records (keep status as locked, just mark invoice_cancelled_at)
+    await supabase.from('commission_records').update({
+      invoice_cancelled_at: now,
+      invoice_cancelled_after_paid: false, // Not paid yet, but locked
+      updated_at: now
+    }).eq('id', commission.id);
+
+    // Create audit log
+    await supabase.from('commission_audit_log').insert({
+      commission_record_id: commission.id,
+      voucher_code: commission.voucher_code,
+      invoice_code: commission.invoice_code,
+      f0_id: commission.f0_id,
+      f0_code: commission.f0_code,
+      event_type: 'INVOICE_CANCELLED_AFTER_LOCKED',
+      event_source: 'webhook',
+      before_data: {
+        status: 'locked',
+        invoice_cancelled_at: null
+      },
+      after_data: {
+        status: 'locked', // Kept
+        invoice_cancelled_at: now,
+        commission_kept: true
+      },
+      notes: `Hóa đơn ${invoiceCode} bị hủy SAU KHI ĐÃ CHỐT. Hoa hồng ${Number(commission.total_commission).toLocaleString()}đ VẪN ĐƯỢC GIỮ.`
+    });
+
+    // Update voucher tracking (just mark invoice status, keep commission_status)
+    await supabase.from('voucher_affiliate_tracking').update({
+      invoice_status: 'Đã hủy',
+      note: `Hóa đơn ${invoiceCode} đã hủy sau khi chốt hoa hồng. Hoa hồng được giữ nguyên.`,
+      updated_at: now
+    }).eq('code', commission.voucher_code);
+
+    // Notify F0
+    await supabase.from('notifications').insert({
+      f0_id: commission.f0_id,
+      type: 'info',
+      content: {
+        title: 'Hóa đơn đã bị hủy (sau khi chốt)',
+        message: `Hóa đơn ${invoiceCode} đã bị hủy. Tuy nhiên, hoa hồng ${Number(commission.total_commission).toLocaleString()}đ của bạn vẫn được giữ nguyên do đã được chốt trước đó.`,
+        invoice_code: invoiceCode,
+        commission_amount: commission.total_commission,
+        commission_kept: true,
+        reason: 'Đã chốt hoa hồng trước khi hóa đơn bị hủy'
+      },
+      is_read: false
+    });
+
+    console.log('[Cancellation] ✅ Processed as LOCKED - commission kept');
+    return {
+      processed: true,
+      action: 'INVOICE_CANCELLED_AFTER_LOCKED',
+      commission_kept: true,
+      f1_adjustment: 0 // No adjustment for locked commissions
+    };
+
   } else {
     // ============================================
-    // SCENARIO B: Commission NOT PAID - CANCEL commission
+    // SCENARIO C: Commission is PENDING - CANCEL commission (not yet locked)
     // ============================================
-    console.log('[Cancellation] ❌ Commission NOT PAID - Cancelling commission...');
+    console.log('[Cancellation] ❌ Commission is PENDING - Cancelling commission (chưa chốt)...');
 
     const previousStatus = commission.status;
 
@@ -331,7 +439,7 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       cancelled_at: now,
       cancelled_by: null,
       cancelled_by_name: 'System - Invoice Cancelled',
-      cancelled_reason: `Hóa đơn ${invoiceCode} đã bị hủy`,
+      cancelled_reason: `Hóa đơn ${invoiceCode} đã bị hủy trước khi chốt hoa hồng`,
       invoice_cancelled_at: now,
       stats_adjusted: true,
       stats_adjusted_at: now,
@@ -345,7 +453,7 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       invoice_code: commission.invoice_code,
       f0_id: commission.f0_id,
       f0_code: commission.f0_code,
-      event_type: 'INVOICE_CANCELLED_BEFORE_PAID',
+      event_type: 'INVOICE_CANCELLED_BEFORE_LOCKED',
       event_source: 'webhook',
       before_data: {
         status: previousStatus,
@@ -353,12 +461,12 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       },
       after_data: {
         status: 'cancelled',
-        cancelled_reason: 'Invoice cancelled',
+        cancelled_reason: 'Invoice cancelled before lock period',
         f1_adjustment: f1Adjustment,
         revenue_adjustment: -Number(commission.invoice_amount),
         commission_cancelled: Number(commission.total_commission)
       },
-      notes: `Hóa đơn ${invoiceCode} bị hủy. Hoa hồng ${Number(commission.total_commission).toLocaleString()}đ ĐÃ BỊ HỦY.`
+      notes: `Hóa đơn ${invoiceCode} bị hủy TRƯỚC KHI CHỐT. Hoa hồng ${Number(commission.total_commission).toLocaleString()}đ ĐÃ BỊ HỦY.`
     });
 
     // Create stats adjustment
@@ -368,8 +476,8 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       commission_record_id: commission.id,
       voucher_code: commission.voucher_code,
       invoice_code: commission.invoice_code,
-      adjustment_type: 'INVOICE_CANCELLED_BEFORE_PAID',
-      adjustment_reason: `Hóa đơn ${invoiceCode} bị hủy trước khi thanh toán hoa hồng`,
+      adjustment_type: 'INVOICE_CANCELLED_BEFORE_LOCKED',
+      adjustment_reason: `Hóa đơn ${invoiceCode} bị hủy trước khi chốt hoa hồng`,
       f1_customer_id: commission.f1_customer_id,
       f1_phone: commission.f1_phone,
       f1_adjustment: f1Adjustment,
@@ -383,8 +491,8 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
     await supabase.from('voucher_affiliate_tracking').update({
       invoice_status: 'Đã hủy',
       commission_status: 'invalid',
-      invalid_reason_code: 'INVOICE_CANCELLED',
-      invalid_reason_text: `Hóa đơn ${invoiceCode} đã bị hủy`,
+      invalid_reason_code: 'INVOICE_CANCELLED_BEFORE_LOCKED',
+      invalid_reason_text: `Hóa đơn ${invoiceCode} đã bị hủy trước khi chốt hoa hồng`,
       updated_at: now
     }).eq('code', commission.voucher_code);
 
@@ -394,18 +502,19 @@ async function handleInvoiceCancellation(supabase: any, invoiceCode: string, inv
       type: 'warning',
       content: {
         title: 'Hoa hồng đã bị hủy',
-        message: `Hóa đơn ${invoiceCode} đã bị hủy. Hoa hồng ${Number(commission.total_commission).toLocaleString()}đ của bạn đã bị hủy theo.`,
+        message: `Hóa đơn ${invoiceCode} đã bị hủy trước khi chốt hoa hồng. Hoa hồng ${Number(commission.total_commission).toLocaleString()}đ của bạn đã bị hủy theo.`,
         invoice_code: invoiceCode,
         commission_amount: commission.total_commission,
-        commission_cancelled: true
+        commission_cancelled: true,
+        reason: 'Hóa đơn bị hủy trước khi hết thời gian chốt'
       },
       is_read: false
     });
 
-    console.log('[Cancellation] ✅ Processed as NOT PAID - commission cancelled');
+    console.log('[Cancellation] ✅ Processed as PENDING - commission cancelled');
     return {
       processed: true,
-      action: 'INVOICE_CANCELLED_BEFORE_PAID',
+      action: 'INVOICE_CANCELLED_BEFORE_LOCKED',
       commission_cancelled: true,
       cancelled_amount: commission.total_commission,
       f1_adjustment: f1Adjustment
@@ -721,7 +830,18 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     return null;
   }
   // Create commission record for lifetime commission
-  const now = getVietnamTime().toISOString();
+  // NEW LOCK SYSTEM: status = 'pending', set qualified_at and lock_date
+  const now = getVietnamTime();
+  const nowIso = now.toISOString();
+
+  // Get lock period settings
+  const lockSettings = await getLockPeriodSettings(supabase);
+  const lockDate = calculateLockDate(now, lockSettings.lock_period_days);
+
+  console.log(`[Lifetime] 📅 Lock period: ${lockSettings.lock_period_days} days`);
+  console.log(`[Lifetime] 📅 Qualified at: ${nowIso}`);
+  console.log(`[Lifetime] 📅 Lock date: ${lockDate.toISOString()}`);
+
   const commissionRecord = {
     voucher_code: assignment.first_voucher_code,
     f0_id: assignment.f0_id,
@@ -755,10 +875,14 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     tier_bonus_amount: commission.tierBonus?.amount || null,
     subtotal_commission: commission.subtotalCommission,
     total_commission: commission.totalCommission,
-    status: 'available',
+    // NEW LOCK SYSTEM
+    status: 'pending',  // Changed from 'available'
+    qualified_at: nowIso,
+    lock_date: lockDate.toISOString(),
+    commission_month: null,  // Will be set when locked
     is_lifetime_commission: true,
     assignment_id: assignment.id,
-    notes: `Hoa hồng trọn đời từ F1 ${customerName || normalizedPhone}`
+    notes: `Hoa hồng trọn đời từ F1 ${customerName || normalizedPhone}. Chờ chốt sau ${lockSettings.lock_period_days} ngày.`
   };
   const { data: newCommission, error: commissionError } = await supabase.from('commission_records').insert(commissionRecord).select('id').single();
   if (commissionError) {
@@ -766,15 +890,19 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     return null;
   }
   console.log(`[Lifetime] ✅ Lifetime commission record created: ${newCommission.id}`);
-  console.log(`[Lifetime] 💰 Amount: ${commission.totalCommission.toLocaleString()}đ`);
+  console.log(`[Lifetime] 💰 Amount: ${commission.totalCommission.toLocaleString()}đ (pending - chờ chốt)`);
+
   // Create notification for F0
   const notificationContent = {
-    title: 'Hoa hồng trọn đời!',
-    message: `Khách hàng ${customerName || normalizedPhone} đã mua hàng lại. Bạn nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng!`,
+    title: 'Hoa hồng trọn đời (chờ chốt)!',
+    message: `Khách hàng ${customerName || normalizedPhone} đã mua hàng lại. Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng sau ${lockSettings.lock_period_days} ngày chờ chốt.`,
     voucher_code: assignment.first_voucher_code,
     invoice_code: invoiceDetail.code,
     commission_amount: commission.totalCommission,
     is_lifetime: true,
+    status: 'pending',
+    lock_date: lockDate.toISOString(),
+    days_until_lock: lockSettings.lock_period_days,
     breakdown: {
       basic: commission.basicCommission?.amount || 0,
       firstOrder: 0,
@@ -790,19 +918,18 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
   console.log('[Lifetime] ✅ Notification created for F0!');
 
   // ============================================
-  // RECALCULATE F0 TIER AFTER LIFETIME COMMISSION
+  // NOTE: DO NOT recalculate F0 tier here!
+  // Tier is only recalculated when commission status = 'locked' or 'paid'
+  // The cron-lock-commissions job will do this when locking the commission
   // ============================================
-  console.log('[Lifetime] 📊 Recalculating F0 tier...');
-  const tierResult = await recalculateF0Tier(supabase, assignment.f0_id, assignment.f0_code);
-  if (tierResult?.upgraded) {
-    console.log(`[Lifetime] 🎉 F0 tier upgraded: ${tierResult.oldTier} → ${tierResult.newTier}`);
-  }
+  console.log('[Lifetime] ℹ️ Tier will be recalculated when commission is locked (after lock period)');
 
   return {
     assignment,
     commission,
     commissionRecordId: newCommission.id,
-    tierResult
+    status: 'pending',
+    lock_date: lockDate.toISOString()
   };
 }
 // ============================================
@@ -1190,6 +1317,16 @@ Deno.serve(async (req) => {
       // Step 10: If commission is valid, create commission_records entry AND F1 assignment
       if (commission.isValid && commission.totalCommission > 0) {
         console.log('[Affiliate] 📝 Creating commission_records entry...');
+
+        // NEW LOCK SYSTEM: Get lock period settings
+        const lockSettings = await getLockPeriodSettings(supabase);
+        const qualifiedAt = getVietnamTime();
+        const lockDate = calculateLockDate(qualifiedAt, lockSettings.lock_period_days);
+
+        console.log(`[Affiliate] 📅 Lock period: ${lockSettings.lock_period_days} days`);
+        console.log(`[Affiliate] 📅 Qualified at: ${qualifiedAt.toISOString()}`);
+        console.log(`[Affiliate] 📅 Lock date: ${lockDate.toISOString()}`);
+
         const commissionRecord = {
           voucher_code: affiliateVoucher.code,
           f0_id: affiliateVoucher.f0_id,
@@ -1222,14 +1359,18 @@ Deno.serve(async (req) => {
           tier_bonus_amount: commission.tierBonus?.amount || null,
           subtotal_commission: commission.subtotalCommission,
           total_commission: commission.totalCommission,
-          status: 'available',
+          // NEW LOCK SYSTEM
+          status: 'pending',  // Changed from 'available'
+          qualified_at: qualifiedAt.toISOString(),
+          lock_date: lockDate.toISOString(),
+          commission_month: null,  // Will be set when locked
           is_lifetime_commission: false // This is a first order
         };
         const { data: newCommission, error: commissionError } = await supabase.from('commission_records').insert(commissionRecord).select('id').single();
         if (commissionError) {
           console.error('[Affiliate] ❌ Failed to create commission_records:', commissionError.message);
         } else {
-          console.log(`[Affiliate] ✅ Commission record created: ${newCommission.id}`);
+          console.log(`[Affiliate] ✅ Commission record created: ${newCommission.id} (status: pending)`);
           // Update voucher_affiliate_tracking with commission_record_id
           await supabase.from('voucher_affiliate_tracking').update({
             commission_record_id: newCommission.id
@@ -1241,25 +1382,26 @@ Deno.serve(async (req) => {
           await createF1Assignment(supabase, contactNumber, invoiceDetail.customerCode, customerName, affiliateVoucher.f0_id, affiliateVoucher.f0_code, affiliateVoucher.code, invoiceDetail.code, convertToVietnamTZ(invoiceDetail.createdDate));
 
           // ============================================
-          // RECALCULATE F0 TIER AFTER COMMISSION CREATED
+          // NOTE: DO NOT recalculate F0 tier here!
+          // Tier is only recalculated when commission status = 'locked' or 'paid'
+          // The cron-lock-commissions job will do this when locking the commission
           // ============================================
-          console.log('[Affiliate] 📊 Recalculating F0 tier...');
-          const tierResult = await recalculateF0Tier(supabase, affiliateVoucher.f0_id, affiliateVoucher.f0_code);
-          if (tierResult?.upgraded) {
-            console.log(`[Affiliate] 🎉 F0 tier upgraded: ${tierResult.oldTier} → ${tierResult.newTier}`);
-          }
+          console.log('[Affiliate] ℹ️ Tier will be recalculated when commission is locked (after lock period)');
         }
         // Step 11: Create notification for F0
         console.log('[Affiliate] 🔔 Creating notification for F0...');
         const notificationContent = {
-          title: shouldRecheck ? 'Hoa hồng đã được cập nhật!' : 'Hoa hồng mới!',
+          title: shouldRecheck ? 'Hoa hồng đã được cập nhật (chờ chốt)!' : 'Hoa hồng mới (chờ chốt)!',
           message: shouldRecheck
-            ? `Hóa đơn ${invoiceDetail.code} đã thanh toán đủ! Bạn nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ ${customerName || contactNumber}`
-            : `Bạn nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ đơn hàng của ${customerName || contactNumber}`,
+            ? `Hóa đơn ${invoiceDetail.code} đã thanh toán đủ! Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ ${customerName || contactNumber} sau ${lockSettings.lock_period_days} ngày chờ chốt.`
+            : `Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ đơn hàng của ${customerName || contactNumber} sau ${lockSettings.lock_period_days} ngày chờ chốt.`,
           voucher_code: usedVoucherCode,
           invoice_code: invoiceDetail.code,
           commission_amount: commission.totalCommission,
           was_partial_payment: shouldRecheck,
+          status: 'pending',
+          lock_date: lockDate.toISOString(),
+          days_until_lock: lockSettings.lock_period_days,
           breakdown: {
             basic: commission.basicCommission?.amount || 0,
             firstOrder: commission.firstOrderCommission?.applied ? commission.firstOrderCommission.amount : 0,
