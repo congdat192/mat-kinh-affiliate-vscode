@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
 import { toast } from '@/components/ui/toast';
+import { supabase } from '@/lib/supabase';
 
 // Notification types
 type NotificationType = 'referral' | 'commission' | 'withdrawal' | 'announcement' | 'alert' | 'system';
@@ -65,7 +66,7 @@ const NotificationsPage = () => {
     return stored ? JSON.parse(stored) : null;
   };
 
-  // Fetch notifications from Edge Function
+  // Fetch notifications using direct Supabase query (faster than Edge Function)
   const fetchNotifications = useCallback(async (showRefreshing = false) => {
     const f0User = getF0User();
     if (!f0User?.id) {
@@ -78,29 +79,18 @@ const NotificationsPage = () => {
     }
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-notifications`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            action: 'get',
-            f0_id: f0User.id,
-            filter: filter === 'all' ? undefined : filter,
-            limit: 100,
-          }),
-        }
-      );
+      // Direct query to notifications VIEW (eliminates Edge Function cold start)
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('f0_id', f0User.id)
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-      const data = await response.json();
-
-      if (data.success) {
-        setNotifications(data.data || []);
+      if (error) {
+        console.error('Failed to fetch notifications:', error);
       } else {
-        console.error('Failed to fetch notifications:', data.error);
+        setNotifications(data || []);
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -108,7 +98,7 @@ const NotificationsPage = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [filter]);
+  }, []);
 
   // Initial load
   useEffect(() => {

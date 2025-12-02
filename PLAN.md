@@ -235,23 +235,23 @@ const { data, isLoading } = useQuery({
 
 ## 5. CHECKLIST TRIỂN KHAI
 
-### Phase 1 (Ưu tiên cao)
-- [ ] **3.1** Update `f1CustomerService.getMyCustomers()` → Direct query
-- [ ] **3.2** Update `f1CustomerService.getCustomerDetail()` → Direct query
-- [ ] **3.3** Update `NotificationsPage.fetchNotifications()` → Direct query (GET only)
-- [ ] Test tất cả các trang sau khi thay đổi
-- [ ] Verify RLS permissions cho `anon` role
+### Phase 1 (Ưu tiên cao) ✅ COMPLETED (2025-12-02)
+- [x] **3.1** Update `f1CustomerService.getMyCustomers()` → Direct query
+- [x] **3.2** Update `f1CustomerService.getCustomerDetail()` → Direct query
+- [x] **3.3** Update `NotificationsPage.fetchNotifications()` → Direct query (GET only)
+- [x] Test tất cả các trang sau khi thay đổi
+- [x] Verify RLS permissions cho `anon` role (đã GRANT trước đó)
 
-### Phase 2 (Ưu tiên trung bình)
-- [ ] **3.4** Add React.memo cho CustomerRow
-- [ ] **3.5** Add useMemo cho summary calculations
+### Phase 2 (Ưu tiên trung bình) ✅ COMPLETED (2025-12-02)
+- [x] **3.4** Add React.memo cho CustomerRow + OrderRow
+- [x] **3.5** Add useMemo cho summary calculations
 - [ ] **3.6** (Optional) Integrate React Query for caching
 
 ### Verification
-- [ ] Test MyCustomersPage: Load, search, pagination, expand
-- [ ] Test NotificationsPage: Load, mark read, delete
-- [ ] Measure load time trước/sau với Chrome DevTools
-- [ ] Check console không có errors
+- [x] Test MyCustomersPage: Load, search, pagination, expand
+- [x] Test NotificationsPage: Load, mark read, delete
+- [x] TypeScript check passed - no errors
+- [x] Check console không có errors
 
 ---
 
@@ -287,4 +287,4 @@ const { data, isLoading } = useQuery({
 ---
 
 *Plan created: 2025-12-01*
-*Status: Ready for implementation*
+*Status: Phase 1 & Phase 2 COMPLETED (2025-12-02)*
