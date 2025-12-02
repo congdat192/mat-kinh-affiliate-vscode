@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-console.info('get-f0-dashboard-stats v16 - Lock system: pending → locked → paid, monthly commission breakdown');
+console.info('get-f0-dashboard-stats v17 - Added lock_payment_settings for dynamic lock period display');
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
       withdrawalsResult,
       tiersResult,
       notificationsResult,
-      adjustmentsResult  // v14: Add adjustments query
+      adjustmentsResult,  // v14: Add adjustments query
+      lockSettingsResult  // v17: Add lock payment settings
     ] = await Promise.all([
       // 1. Get F0 partner info
       supabase.from('f0_partners')
@@ -87,7 +88,13 @@ Deno.serve(async (req) => {
       // 7. v14: Get stats adjustments
       supabase.from('f0_stats_adjustments')
         .select('*')
-        .eq('f0_id', f0_id)
+        .eq('f0_id', f0_id),
+
+      // 8. v17: Get lock payment settings
+      supabase.from('lock_payment_settings')
+        .select('lock_period_days, payment_day')
+        .eq('is_active', true)
+        .single()
     ]);
 
     // Check F0 exists
@@ -109,6 +116,11 @@ Deno.serve(async (req) => {
     const withdrawals = withdrawalsResult.data || [];
     const tiers = tiersResult.data || [];
     const adjustments = adjustmentsResult.data || [];
+
+    // v17: Extract lock settings with fallback defaults
+    const lockSettings = lockSettingsResult.data || { lock_period_days: 15, payment_day: 5 };
+    console.log(`=== LOCK SETTINGS (v17) ===`);
+    console.log(`Lock period: ${lockSettings.lock_period_days} days, Payment day: ${lockSettings.payment_day}`);
 
     if (tiers.length === 0) {
       console.log('WARNING: Tiers query returned empty! Error:', tiersResult.error);
@@ -381,7 +393,12 @@ Deno.serve(async (req) => {
         }))
       },
       recentActivity,
-      unreadNotifications: notificationsResult.count || 0
+      unreadNotifications: notificationsResult.count || 0,
+      // v17: Lock payment settings for dynamic display
+      lockSettings: {
+        lockPeriodDays: lockSettings.lock_period_days,
+        paymentDay: lockSettings.payment_day
+      }
     };
 
     return new Response(JSON.stringify({

@@ -93,12 +93,19 @@ interface F0Info {
   joinedAt: string;
 }
 
+// v17: Lock payment settings from database
+interface LockSettings {
+  lockPeriodDays: number;
+  paymentDay: number;
+}
+
 interface DashboardData {
   f0Info: F0Info;
   stats: DashboardStats;
   tier: TierInfo;
   recentActivity: RecentActivity[];
   unreadNotifications: number;
+  lockSettings?: LockSettings; // v17: Add lock settings
 }
 
 const DashboardPage = () => {
@@ -234,7 +241,10 @@ const DashboardPage = () => {
     );
   }
 
-  const { f0Info, stats, tier, recentActivity, unreadNotifications } = dashboardData;
+  const { f0Info, stats, tier, recentActivity, unreadNotifications, lockSettings } = dashboardData;
+  // v17: Default lock settings if not provided
+  const lockPeriodDays = lockSettings?.lockPeriodDays || 15;
+  const paymentDay = lockSettings?.paymentDay || 5;
   const currentTierConfig = getTierConfig(tier.current);
   const nextTierConfig = tier.next ? getTierConfig(tier.next) : null;
 
@@ -730,7 +740,7 @@ const DashboardPage = () => {
               Tình trạng hoa hồng
             </CardTitle>
             <CardDescription>
-              Hoa hồng được chốt sau 15 ngày và thanh toán vào ngày 5 mỗi tháng
+              Hoa hồng được chốt sau {lockPeriodDays} ngày và thanh toán vào ngày {paymentDay} mỗi tháng
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -799,8 +809,8 @@ const DashboardPage = () => {
                 <div className="text-sm text-gray-600">
                   <p className="font-medium text-gray-700">Cách tính hoa hồng</p>
                   <ul className="mt-1 space-y-1">
-                    <li>• <span className="text-orange-600 font-medium">Chờ chốt:</span> Hoa hồng đang trong 15 ngày chờ xác nhận</li>
-                    <li>• <span className="text-purple-600 font-medium">Đã chốt:</span> Hoa hồng đã được xác nhận, chờ thanh toán vào ngày 5 tháng sau</li>
+                    <li>• <span className="text-orange-600 font-medium">Chờ chốt:</span> Hoa hồng đang trong {lockPeriodDays} ngày chờ xác nhận</li>
+                    <li>• <span className="text-purple-600 font-medium">Đã chốt:</span> Hoa hồng đã được xác nhận, chờ thanh toán vào ngày {paymentDay} tháng sau</li>
                     <li>• <span className="text-green-600 font-medium">Đã nhận:</span> Hoa hồng đã được chuyển vào tài khoản của bạn</li>
                   </ul>
                 </div>

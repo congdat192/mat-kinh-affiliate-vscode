@@ -98,12 +98,13 @@ mat-kinh-affiliate-vscode/
 - Services handle API calls, components handle UI
 - Toast notifications via `@/components/ui/toast`
 
-### Commission Logic (v16 Lock System)
+### Commission Logic (v16 Lock System + v17 Dynamic Settings)
 - Revenue counted only when `total = totalpayment` (fully paid)
 - **Commission status flow**: `pending` → `locked` → `paid`
-- **Lock period**: 15 days after invoice is fully paid
+- **Lock period**: Configurable via `api.lock_payment_settings.lock_period_days` (default: 20 days)
+- **Payment day**: Configurable via `api.lock_payment_settings.payment_day` (default: 5th of month)
 - **Tier calculation**: Only counts `locked` + `paid` commissions (NOT pending)
-- **Admin payment**: Batch payment on 5th of each month via `admin-process-payment-batch`
+- **Admin payment**: Batch payment on configured day via `admin-process-payment-batch`
 - **Cancellation rules**:
   - If invoice cancelled while `pending` → commission cancelled
   - If invoice cancelled after `locked` → commission kept
@@ -193,7 +194,7 @@ Tables synced from KiotViet POS via webhook:
 |----------|---------|-------------|
 | `get-f0-my-customers` | v2 | Gets F1 customers list for F0 with lock system fields |
 | `get-f1-customer-detail` | v2 | Gets F1 customer detail with order history + lock system |
-| `get-f0-dashboard-stats` | v16 | Dashboard stats with lock system support (pending/locked/paid breakdown) |
+| `get-f0-dashboard-stats` | v17 | Dashboard stats with lock system + dynamic lock settings from database |
 
 ---
 
@@ -268,6 +269,16 @@ F0 receives payment (bank transfer / cash)
 ---
 
 ## 9. RECENT FIXES
+
+### 2025-12-02 (Dynamic Lock Settings v17)
+- **Dynamic Lock Settings**: Lock period and payment day now fetched from database instead of hardcoded
+- **Edge Functions Updated**:
+  - `get-f0-dashboard-stats` v17: Added `lock_payment_settings` query, returns `lockSettings: { lockPeriodDays, paymentDay }`
+- **F0 Portal Updates**:
+  - `WithdrawalPage.tsx`: Replaced all hardcoded "15 ngày" → `{lockSettings.lockPeriodDays}`, "ngày 5" → `{lockSettings.paymentDay}`
+  - `DashboardPage.tsx`: Same dynamic replacement for lock period displays
+- **Database Table Used**: `api.lock_payment_settings` (synced with `affiliate.lock_payment_settings` from Admin Portal)
+  - Current values: `lock_period_days = 20`, `payment_day = 5`
 
 ### 2025-12-02 (Commission Lock System v16 - Full Implementation)
 - **Commission Lock System Implementation**: Major overhaul of commission status flow

@@ -75,11 +75,22 @@ interface WithdrawalData {
   minWithdrawalAmount: number;
 }
 
+// v16: Lock payment settings from database
+interface LockSettings {
+  lockPeriodDays: number;
+  paymentDay: number;
+}
+
 const WithdrawalPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<WithdrawalData | null>(null);
+  // v16: Lock settings from database (default values as fallback)
+  const [lockSettings, setLockSettings] = useState<LockSettings>({
+    lockPeriodDays: 15,
+    paymentDay: 5,
+  });
   // v16: Removed withdrawal form states - F0 no longer submits withdrawal requests
   // Admin pays directly via batch payment system
 
@@ -163,6 +174,14 @@ const WithdrawalPage = () => {
       };
 
       setData(mergedData);
+
+      // v17: Update lock settings from dashboard response
+      if (dashboardResult.success && dashboardResult.data.lockSettings) {
+        setLockSettings({
+          lockPeriodDays: dashboardResult.data.lockSettings.lockPeriodDays || 15,
+          paymentDay: dashboardResult.data.lockSettings.paymentDay || 5,
+        });
+      }
     } catch (err) {
       console.error('Withdrawal data fetch error:', err);
       toast.error('Có lỗi xảy ra khi tải dữ liệu');
@@ -373,7 +392,7 @@ const WithdrawalPage = () => {
               Tình Trạng Hoa Hồng
             </CardTitle>
             <CardDescription>
-              Hoa hồng được chốt sau 15 ngày và thanh toán tự động vào ngày 5 hàng tháng
+              Hoa hồng được chốt sau {lockSettings.lockPeriodDays} ngày và thanh toán tự động vào ngày {lockSettings.paymentDay} hàng tháng
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -389,7 +408,7 @@ const WithdrawalPage = () => {
                   {formatCurrency(balance.pendingCommission || 0)}
                 </p>
                 <p className="text-xs text-orange-600 mt-1">
-                  Đang trong thời gian chờ xác nhận (15 ngày)
+                  Đang trong thời gian chờ xác nhận ({lockSettings.lockPeriodDays} ngày)
                 </p>
               </div>
 
@@ -403,7 +422,7 @@ const WithdrawalPage = () => {
                   {formatCurrency(balance.lockedCommission || balance.availableBalance || 0)}
                 </p>
                 <p className="text-xs text-purple-600 mt-1">
-                  Sẽ được thanh toán vào ngày 5 tháng sau
+                  Sẽ được thanh toán vào ngày {lockSettings.paymentDay} tháng sau
                 </p>
               </div>
 
@@ -431,15 +450,15 @@ const WithdrawalPage = () => {
                   <ul className="mt-2 space-y-2 text-sm text-blue-800">
                     <li className="flex items-center gap-2">
                       <span className="w-5 h-5 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-semibold">1</span>
-                      <span><strong>Chờ chốt:</strong> Hoa hồng từ đơn hàng mới sẽ được chờ xác nhận trong 15 ngày</span>
+                      <span><strong>Chờ chốt:</strong> Hoa hồng từ đơn hàng mới sẽ được chờ xác nhận trong {lockSettings.lockPeriodDays} ngày</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="w-5 h-5 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-xs font-semibold">2</span>
-                      <span><strong>Đã chốt:</strong> Sau 15 ngày, hoa hồng được chốt và EXP được cộng vào tài khoản</span>
+                      <span><strong>Đã chốt:</strong> Sau {lockSettings.lockPeriodDays} ngày, hoa hồng được chốt và EXP được cộng vào tài khoản</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="w-5 h-5 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-semibold">3</span>
-                      <span><strong>Thanh toán:</strong> Vào ngày 5 hàng tháng, hoa hồng đã chốt sẽ được chuyển vào tài khoản ngân hàng của bạn</span>
+                      <span><strong>Thanh toán:</strong> Vào ngày {lockSettings.paymentDay} hàng tháng, hoa hồng đã chốt sẽ được chuyển vào tài khoản ngân hàng của bạn</span>
                     </li>
                   </ul>
                 </div>
@@ -498,7 +517,7 @@ const WithdrawalPage = () => {
               <div className="text-center py-12 text-gray-500">
                 <Wallet className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                 <p className="text-lg font-medium">Chưa có lịch sử thanh toán</p>
-                <p className="text-sm mt-1">Hoa hồng đã chốt sẽ được thanh toán vào ngày 5 hàng tháng</p>
+                <p className="text-sm mt-1">Hoa hồng đã chốt sẽ được thanh toán vào ngày {lockSettings.paymentDay} hàng tháng</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
