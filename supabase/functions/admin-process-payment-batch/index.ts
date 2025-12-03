@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-console.info('Admin process payment batch started - v1 (Process commission payments for a month)');
+console.info('Admin process payment batch started - v2 (Supports selective F0 payment)');
 
 // ============================================
 // HELPER FUNCTIONS
@@ -15,6 +15,17 @@ function getVietnamTime() {
   const now = new Date();
   const utcTime = now.getTime() + now.getTimezoneOffset() * 60000;
   return new Date(utcTime + 7 * 3600000);
+}
+
+function toVietnamISOString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const ms = String(date.getMilliseconds()).padStart(3, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${ms}+07:00`;
 }
 
 // ============================================
@@ -47,23 +58,15 @@ Deno.serve(async (req) => {
     // Parse request body
     const body = await req.json().catch(() => ({}));
     const {
-      payment_month,      // Required: '2025-11'
+      // v2: Support both modes
+      f0_ids,             // Optional: Array of F0 IDs to pay (selective mode)
+      payment_month,      // Optional if f0_ids provided, Required otherwise: '2025-11'
       admin_user_id,      // Required: UUID of admin user
       admin_user_name,    // Required: Name of admin user
       notes               // Optional: Notes for this payment batch
     } = body;
 
     // Validate required fields
-    if (!payment_month) {
-      return new Response(JSON.stringify({
-        success: false,
-        error: 'payment_month is required (format: YYYY-MM)'
-      }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
     if (!admin_user_id || !admin_user_name) {
       return new Response(JSON.stringify({
         success: false,
@@ -74,34 +77,71 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Validate payment_month format
-    const monthRegex = /^\d{4}-\d{2}$/;
-    if (!monthRegex.test(payment_month)) {
+    // v2: Determine payment mode
+    const isSelectiveMode = f0_ids && Array.isArray(f0_ids) && f0_ids.length > 0;
+
+    // If not selective mode, payment_month is required
+    if (!isSelectiveMode && !payment_month) {
       return new Response(JSON.stringify({
         success: false,
-        error: 'Invalid payment_month format. Use YYYY-MM (e.g., 2025-11)'
+        error: 'Either f0_ids (array) or payment_month (YYYY-MM) is required'
       }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
 
+    // Validate payment_month format if provided
+    if (payment_month) {
+      const monthRegex = /^\d{4}-\d{2}$/;
+      if (!monthRegex.test(payment_month)) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: 'Invalid payment_month format. Use YYYY-MM (e.g., 2025-11)'
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
     const now = getVietnamTime();
-    const nowIso = now.toISOString();
+    const nowIso = toVietnamISOString(now);
+    const paymentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
     console.log('====================================');
-    console.log('[Payment] 💰 Starting payment batch process...');
-    console.log(`[Payment] Payment month: ${payment_month}`);
+    console.log('[Payment] 💰 Starting payment batch process (v2)...');
+    console.log(`[Payment] Mode: ${isSelectiveMode ? 'SELECTIVE (by F0 IDs)' : 'MONTHLY (all locked)'}`);
+    if (isSelectiveMode) {
+      console.log(`[Payment] Selected F0s: ${f0_ids.length}`);
+    }
+    if (payment_month) {
+      console.log(`[Payment] Payment month filter: ${payment_month}`);
+    }
     console.log(`[Payment] Admin: ${admin_user_name} (${admin_user_id})`);
     console.log(`[Payment] Process time: ${nowIso}`);
     console.log('====================================');
 
-    // Step 1: Get all locked commissions for the specified month
-    const { data: lockedCommissions, error: fetchError } = await supabase
+    // Step 1: Build query based on mode
+    let query = supabase
       .from('commission_records')
-      .select('id, f0_id, f0_code, voucher_code, invoice_code, total_commission, f1_phone, f1_name')
-      .eq('status', 'locked')
-      .eq('commission_month', payment_month);
+      .select('id, f0_id, f0_code, voucher_code, invoice_code, total_commission, f1_phone, f1_name, commission_month')
+      .eq('status', 'locked');
+
+    if (isSelectiveMode) {
+      // Selective mode: filter by F0 IDs
+      query = query.in('f0_id', f0_ids);
+
+      // Optionally also filter by month if provided
+      if (payment_month) {
+        query = query.eq('commission_month', payment_month);
+      }
+    } else {
+      // Monthly mode: filter by payment_month
+      query = query.eq('commission_month', payment_month);
+    }
+
+    const { data: lockedCommissions, error: fetchError } = await query;
 
     if (fetchError) {
       console.error('[Payment] ❌ Error fetching locked commissions:', fetchError.message);
@@ -115,13 +155,16 @@ Deno.serve(async (req) => {
     }
 
     if (!lockedCommissions || lockedCommissions.length === 0) {
-      console.log('[Payment] ℹ️ No locked commissions found for this month');
+      console.log('[Payment] ℹ️ No locked commissions found');
       return new Response(JSON.stringify({
         success: true,
-        message: `No locked commissions found for ${payment_month}`,
+        message: isSelectiveMode
+          ? 'No locked commissions found for selected F0s'
+          : `No locked commissions found for ${payment_month}`,
         payment_batch_id: null,
         paid_count: 0,
-        total_amount: 0
+        total_amount: 0,
+        total_f0_count: 0
       }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -134,8 +177,15 @@ Deno.serve(async (req) => {
     const f0Groups: Record<string, any[]> = {};
     let totalAmount = 0;
 
+    // v2: Track commission months for batch naming
+    const commissionMonths = new Set<string>();
+
     for (const commission of lockedCommissions) {
       totalAmount += Number(commission.total_commission);
+
+      if (commission.commission_month) {
+        commissionMonths.add(commission.commission_month);
+      }
 
       if (!f0Groups[commission.f0_id]) {
         f0Groups[commission.f0_id] = [];
@@ -145,70 +195,41 @@ Deno.serve(async (req) => {
 
     const f0Count = Object.keys(f0Groups).length;
 
+    // v2: Determine batch payment_month label
+    const batchPaymentMonth = payment_month ||
+      (commissionMonths.size === 1 ? Array.from(commissionMonths)[0] :
+       `${Array.from(commissionMonths).sort()[0]}_mixed`);
+
     console.log(`[Payment] Total F0s: ${f0Count}`);
     console.log(`[Payment] Total amount: ${totalAmount.toLocaleString()}đ`);
+    console.log(`[Payment] Commission months: ${Array.from(commissionMonths).join(', ')}`);
 
-    // Step 3: Create payment batch record
-    // Note: Using supabase client with schema 'api', need to use RPC or direct table access
-    // For now, let's create the batch using a transaction-like approach
+    // Step 3: Create payment batch record via RPC
+    const batchId = crypto.randomUUID();
 
-    const { data: batchResult, error: batchError } = await supabase.rpc('create_payment_batch', {
-      p_payment_month: payment_month,
-      p_payment_date: now.toISOString().split('T')[0], // YYYY-MM-DD
+    const { error: createBatchError } = await supabase.rpc('create_payment_batch', {
+      p_id: batchId,
+      p_payment_month: batchPaymentMonth,
+      p_payment_date: paymentDate,
       p_total_f0_count: f0Count,
       p_total_commission: totalAmount,
+      p_status: 'processing',
       p_created_by: admin_user_id,
       p_created_by_name: admin_user_name,
-      p_notes: notes || null
+      p_notes: notes || (isSelectiveMode ? `Selective payment for ${f0Count} F0s` : null)
     });
 
-    let batchId: string;
-
-    if (batchError) {
-      // If RPC doesn't exist, create batch manually using direct insert
-      console.log('[Payment] RPC not found, creating batch directly...');
-
-      // We need to insert into affiliate.payment_batches - but we're using api schema
-      // Let's create a view or use execute_sql
-      const insertBatchQuery = `
-        INSERT INTO affiliate.payment_batches (
-          payment_month, payment_date, total_f0_count, total_commission,
-          status, created_by, created_by_name, notes, created_at
-        ) VALUES (
-          '${payment_month}',
-          '${now.toISOString().split('T')[0]}',
-          ${f0Count},
-          ${totalAmount},
-          'processing',
-          '${admin_user_id}'::uuid,
-          '${admin_user_name}',
-          ${notes ? `'${notes.replace(/'/g, "''")}'` : 'NULL'},
-          now()
-        ) RETURNING id;
-      `;
-
-      // Use the service role client to execute raw SQL
-      const serviceSupabase = createClient(supabaseUrl, supabaseServiceKey);
-      const { data: insertResult, error: insertError } = await serviceSupabase.rpc('exec_sql', {
-        query: insertBatchQuery
-      });
-
-      if (insertError) {
-        // If exec_sql doesn't exist either, generate UUID manually
-        console.log('[Payment] Creating batch with generated UUID...');
-        batchId = crypto.randomUUID();
-      } else {
-        batchId = insertResult?.[0]?.id || crypto.randomUUID();
-      }
+    if (createBatchError) {
+      console.log('[Payment] ⚠️ RPC create_payment_batch failed:', createBatchError.message);
+      console.log('[Payment] Continuing without batch record...');
     } else {
-      batchId = batchResult?.id || crypto.randomUUID();
+      console.log(`[Payment] Payment batch created: ${batchId}`);
     }
-
-    console.log(`[Payment] Payment batch created: ${batchId}`);
 
     // Step 4: Update all commissions to 'paid'
     let paidCount = 0;
     let errorCount = 0;
+    const failedCommissions: string[] = [];
 
     for (const commission of lockedCommissions) {
       const { error: updateError } = await supabase
@@ -226,25 +247,32 @@ Deno.serve(async (req) => {
       if (updateError) {
         console.error(`[Payment] ❌ Error updating commission ${commission.id}:`, updateError.message);
         errorCount++;
+        failedCommissions.push(commission.id);
       } else {
         paidCount++;
       }
     }
 
     console.log(`[Payment] Updated ${paidCount} commissions to paid`);
+    if (errorCount > 0) {
+      console.log(`[Payment] ⚠️ ${errorCount} commissions failed to update`);
+    }
 
     // Step 5: Send notifications to each F0
+    const notificationResults: { f0_code: string; success: boolean }[] = [];
+
     for (const [f0Id, commissions] of Object.entries(f0Groups)) {
       const f0Total = commissions.reduce((sum, c) => sum + Number(c.total_commission), 0);
       const f0Code = commissions[0].f0_code;
+      const f0CommissionMonths = [...new Set(commissions.map(c => c.commission_month))].filter(Boolean);
 
-      await supabase.from('notifications').insert({
+      const { error: notifError } = await supabase.from('notifications').insert({
         f0_id: f0Id,
         type: 'payment',
         content: {
           title: '💰 Hoa hồng đã được thanh toán!',
-          message: `Bạn đã nhận được ${f0Total.toLocaleString()}đ hoa hồng tháng ${payment_month}. Tổng cộng ${commissions.length} đơn hàng.`,
-          payment_month: payment_month,
+          message: `Bạn đã nhận được ${f0Total.toLocaleString()}đ hoa hồng${f0CommissionMonths.length === 1 ? ` tháng ${f0CommissionMonths[0]}` : ''}. Tổng cộng ${commissions.length} đơn hàng.`,
+          payment_month: f0CommissionMonths.join(', '),
           total_amount: f0Total,
           commission_count: commissions.length,
           payment_batch_id: batchId,
@@ -253,29 +281,35 @@ Deno.serve(async (req) => {
         is_read: false
       });
 
-      console.log(`[Payment] Notification sent to F0: ${f0Code}`);
+      notificationResults.push({ f0_code, success: !notifError });
+
+      if (notifError) {
+        console.error(`[Payment] ⚠️ Failed to send notification to ${f0Code}:`, notifError.message);
+      } else {
+        console.log(`[Payment] ✅ Notification sent to F0: ${f0Code}`);
+      }
     }
 
     // Step 6: Update batch status to completed
-    // Note: Since we may not have direct access to affiliate schema, we'll try RPC first
     const { error: completeBatchError } = await supabase.rpc('complete_payment_batch', {
       p_batch_id: batchId,
       p_completed_by: admin_user_id,
-      p_completed_by_name: admin_user_name
+      p_completed_by_name: admin_user_name,
+      p_status: errorCount === 0 ? 'completed' : 'completed_with_errors'
     });
 
     if (completeBatchError) {
-      console.log('[Payment] RPC complete_payment_batch not found, batch marked as processing');
-      // Batch remains in 'processing' state - admin can complete via dashboard
+      console.log('[Payment] ⚠️ RPC complete_payment_batch failed, batch remains in processing state');
     }
 
     // Step 7: Log summary
     console.log('====================================');
     console.log('[Payment] ✅ Payment batch completed!');
     console.log(`[Payment]    Batch ID: ${batchId}`);
-    console.log(`[Payment]    Month: ${payment_month}`);
+    console.log(`[Payment]    Mode: ${isSelectiveMode ? 'Selective' : 'Monthly'}`);
+    console.log(`[Payment]    Month(s): ${Array.from(commissionMonths).join(', ')}`);
     console.log(`[Payment]    F0s paid: ${f0Count}`);
-    console.log(`[Payment]    Commissions paid: ${paidCount}`);
+    console.log(`[Payment]    Commissions paid: ${paidCount}/${lockedCommissions.length}`);
     console.log(`[Payment]    Total amount: ${totalAmount.toLocaleString()}đ`);
     console.log(`[Payment]    Errors: ${errorCount}`);
     console.log('====================================');
@@ -285,16 +319,22 @@ Deno.serve(async (req) => {
       f0_id: f0Id,
       f0_code: commissions[0].f0_code,
       commission_count: commissions.length,
-      total_amount: commissions.reduce((sum, c) => sum + Number(c.total_commission), 0)
+      commission_months: [...new Set(commissions.map(c => c.commission_month))].filter(Boolean),
+      total_amount: commissions.reduce((sum, c) => sum + Number(c.total_commission), 0),
+      notification_sent: notificationResults.find(n => n.f0_code === commissions[0].f0_code)?.success || false
     }));
 
     return new Response(JSON.stringify({
       success: true,
-      message: `Payment batch completed for ${payment_month}`,
+      message: errorCount === 0
+        ? `Payment batch completed successfully`
+        : `Payment batch completed with ${errorCount} errors`,
       payment_batch_id: batchId,
-      payment_month: payment_month,
+      payment_mode: isSelectiveMode ? 'selective' : 'monthly',
+      payment_month: batchPaymentMonth,
       paid_count: paidCount,
       error_count: errorCount,
+      failed_commission_ids: failedCommissions,
       total_f0_count: f0Count,
       total_amount: totalAmount,
       f0_summary: f0Summary,

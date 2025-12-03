@@ -180,7 +180,7 @@ Tables synced from KiotViet POS via webhook:
 | `webhook-affiliate-check-voucher-invoice` | v10 | Handles KiotViet invoice webhook for commission calculation (lock system v16) |
 | `cron-affiliate-commission-sync` | v1 | Backup cron job for missed webhooks (runs every 15 min) |
 | `cron-lock-commissions` | v1 | Locks pending commissions after 15-day period (runs daily at 1:00 AM) |
-| `admin-process-payment-batch` | v1 | Admin batch payment for locked commissions (runs on 5th of month) |
+| `admin-process-payment-batch` | v2 | Admin batch payment with selective F0 support (monthly/selective modes) |
 
 ### Auth Functions
 | Function | Description |
@@ -195,6 +195,7 @@ Tables synced from KiotViet POS via webhook:
 | `get-f0-my-customers` | v2 | Gets F1 customers list for F0 with lock system fields |
 | `get-f1-customer-detail` | v2 | Gets F1 customer detail with order history + lock system |
 | `get-f0-dashboard-stats` | v17 | Dashboard stats with lock system + dynamic lock settings from database |
+| `get-f0-payment-history` | v1 | Payment batches, locked/pending commissions, batch details |
 
 ---
 
@@ -203,7 +204,7 @@ Tables synced from KiotViet POS via webhook:
 ### `campaignService.ts`
 | Method | Description |
 |--------|-------------|
-| `getRecentReferrals(f0_code, limit)` | Gets recent referrals from `voucher_affiliate_tracking` |
+| `getRecentReferrals(f0_code, limit)` | Gets recent referrals from `voucher_affiliate_tracking` (v2: fixed column mapping) |
 | `getAllCampaigns()` | Returns active campaigns |
 | `issueVoucher(request)` | Issues voucher via external API |
 
@@ -251,11 +252,12 @@ cron-lock-commissions (daily at 1:00 AM):
   - If lock_date <= today AND status = pending → commission_status: locked
   - Updates F0 tier based on locked + paid commissions
          ↓
-admin-process-payment-batch (5th of month):
-  - Gets all locked commissions for each F0
+admin-process-payment-batch (v2):
+  - Mode 1: Selective - Pays specific F0s via f0_ids array
+  - Mode 2: Monthly - Pays all locked commissions for payment_month
   - Creates payment batch record
   - Updates commission_status: locked → paid
-  - Records paid_at timestamp
+  - Sends notification to each F0
          ↓
 F0 receives payment (bank transfer / cash)
 ```
@@ -269,6 +271,62 @@ F0 receives payment (bank transfer / cash)
 ---
 
 ## 9. RECENT FIXES
+
+### 2025-12-03 (Fixes & Improvements)
+- **LoginPage.tsx**: Fixed login error display
+  - Problem: `supabase.functions.invoke()` doesn't properly surface HTTP error body from Edge Functions
+  - Solution: Switched to direct `fetch()` call for proper error handling
+  - Error messages from Edge Function (Vietnamese) now display correctly to user
+- **campaignService.ts**: Fixed `getRecentReferrals()` column mapping
+  - Problem: Service was querying wrong columns (`f1_phone`, `f1_name`, `claimed_at`)
+  - Solution: Updated to correct columns (`recipient_phone`, `recipient_name`, `created_at`)
+  - View `api.voucher_affiliate_tracking` columns: `code`, `recipient_phone`, `recipient_name`, `recipient_email`, `created_at`, `activation_status`, `voucher_used`
+- **admin-process-payment-batch v2**: Upgraded to support selective F0 payment
+  - Added `f0_ids` array parameter for selective mode
+  - Added `payment_mode` response field (`'selective'` | `'monthly'`)
+  - Added `f0_summary` with notification_sent status per F0
+  - Called from ERP Admin `BatchPaymentPage` with month filter
+
+### 2025-12-03 Session 3 (UI Cleanup)
+- **WithdrawalPage.tsx**: Removed duplicate Balance Summary Cards
+  - Removed lines 896-918 (3 cards: Chờ chốt, Đã chốt, Đã Nhận at top of page)
+  - These cards duplicated content already shown in "Tổng quan" tab (Overview Tab)
+  - Now page goes directly from header → bank warning → tabs
+
+### 2025-12-03 Session 2 (Payment History Enhancement)
+- **WithdrawalPage.tsx**: Major extension with payment history feature
+  - Added Tabs component: "Tổng quan" (Overview) and "Lịch sử thanh toán" (History)
+  - **Overview Tab**: Existing commission status (pending/locked/paid), bank info, payment flow info
+  - **History Tab**:
+    - Payment batches list with view detail button
+    - Summary cards (total batches, total paid, locked amount)
+    - Locked commissions table (waiting for next payment)
+    - Pending commissions table (with days_until_lock countdown)
+  - **Batch Detail Modal**:
+    - Commission breakdown summary (basic, tier bonus, first order, total)
+    - Full commission records table with all details
+    - Customer info with "Khách mới" badge
+    - Invoice dates and amounts
+  - New types: `PaymentBatch`, `CommissionRecord`, `PaymentHistoryData`, `BatchDetailData`
+  - New state: `paymentHistory`, `loadingHistory`, `selectedBatch`, `batchDetail`, `activeTab`
+  - New functions: `fetchPaymentHistory()`, `fetchBatchDetail()`, `handleViewBatchDetail()`
+
+- **New Edge Function**: `get-f0-payment-history`
+  - **Endpoint**: POST `/functions/v1/get-f0-payment-history`
+  - **Parameters**:
+    - `f0_id` (required): F0 partner UUID
+    - `action` (optional): `'get_batch_detail'` for specific batch
+    - `batch_id` (optional): Required when action is `'get_batch_detail'`
+    - `limit` (optional): Max records per query (default: 50)
+  - **Default Response**:
+    - `payment_batches[]`: F0's payment batches with calculated amounts
+    - `locked_commissions[]`: Commissions waiting for payment
+    - `pending_commissions[]`: Commissions waiting for lock
+    - `summary`: Totals and counts
+  - **Batch Detail Response**:
+    - `batch`: Payment batch info
+    - `commissions[]`: All commission records in batch
+    - `breakdown`: { basic_total, tier_bonus_total, first_order_total, total, count }
 
 ### 2025-12-02 (Dynamic Lock Settings v17)
 - **Dynamic Lock Settings**: Lock period and payment day now fetched from database instead of hardcoded
@@ -338,14 +396,18 @@ F0 receives payment (bank transfer / cash)
 
 ## 10. RELATED PROJECTS
 
-### Admin Affiliate Portal (Separate Project)
-- **Location**: `admin-affiliate/` (separate codebase)
+### Admin Affiliate Portal (ERP Module)
+- **Location**: `d:\ERP-FE-fresh\src\modules\affiliate\` (separate repo)
+- **Repo**: `https://github.com/DKHoa2509/ERP-FE.git`
 - **Purpose**: Admin quản lý hệ thống Affiliate
+- **Key Features**:
+  - BatchPaymentPage: Thanh toán hoa hồng theo batch với filter tháng
+  - AffiliateSettingsPage: Cài đặt lock period, payment day
+  - F0ApprovalPage: Phê duyệt F0 partner
 - **Shared Resources**:
   - Same Supabase project (`kcirpjxbjqagrqrjfldu`)
   - Same schema `api` và `affiliate`
   - Same Edge Functions (+ thêm `admin-*` functions)
-- **Plan Details**: See `PLAN.md` for full implementation plan
 
 ### Architecture Overview
 ```
@@ -357,10 +419,12 @@ F0 receives payment (bank transfer / cash)
          │                                      │
     ┌────┴────┐                           ┌────┴────┐
     │   F0    │                           │  Admin  │
-    │ Portal  │                           │ Portal  │
-    │ (This)  │                           │ (NEW)   │
+    │ Portal  │                           │ ERP     │
+    │ (This)  │                           │(modules/│
+    │         │                           │affiliate│
     └─────────┘                           └─────────┘
-    mat-kinh-affiliate-vscode/         admin-affiliate/
+    mat-kinh-affiliate-vscode/         ERP-FE-fresh/
+    localhost:5174                     localhost:8080
 ```
 
 ---

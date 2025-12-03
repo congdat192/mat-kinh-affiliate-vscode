@@ -7,7 +7,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Eye, EyeOff } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -28,24 +27,28 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      // Call Edge Function to login
-      const { data, error } = await supabase.functions.invoke('login-affiliate', {
-        body: {
+      // Call Edge Function to login using fetch for better error handling
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/login-affiliate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({
           email_or_phone: formData.emailOrPhone,
           password: formData.password
-        }
+        })
       });
 
-      // Network or connection error
-      if (error) {
-        console.error('Supabase invoke error:', error);
-        throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
-      }
+      const data = await response.json();
 
-      // Edge Function returned error (success: false)
-      if (!data?.success) {
+      // Edge Function returned error (success: false or HTTP error)
+      if (!response.ok || !data?.success) {
         // Use error message directly from Edge Function (already in Vietnamese)
-        const errorMessage = data?.error || 'Đăng nhập thất bại';
+        const errorMessage = data?.error || 'Đăng nhập thất bại. Vui lòng thử lại.';
         console.log('Login failed:', data?.error_code, errorMessage);
         throw new Error(errorMessage);
       }

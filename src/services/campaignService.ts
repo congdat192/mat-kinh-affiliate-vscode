@@ -344,11 +344,13 @@ class CampaignService {
    */
   async getRecentReferrals(f0_code: string, limit: number = 5): Promise<RecentReferral[]> {
     try {
+      // View columns: code, recipient_phone, recipient_name, recipient_email,
+      // created_at, activation_status, voucher_used
       const { data, error } = await supabase
         .from('voucher_affiliate_tracking')
-        .select('id, f1_phone, f1_name, voucher_code, status, claimed_at, used_at')
+        .select('code, recipient_phone, recipient_name, recipient_email, created_at, activation_status, voucher_used')
         .eq('f0_code', f0_code)
-        .order('claimed_at', { ascending: false })
+        .order('created_at', { ascending: false })
         .limit(limit);
 
       if (error) {
@@ -362,13 +364,13 @@ class CampaignService {
 
       // Map database records to RecentReferral interface
       return data.map((record: any) => ({
-        id: record.id,
-        name: record.f1_name || 'Khách hàng',
-        phone: record.f1_phone || '',
-        email: '', // voucher_affiliate_tracking doesn't store email
-        date: record.claimed_at || new Date().toISOString(),
-        status: record.used_at ? 'used' : 'sent',
-        voucherCode: record.voucher_code || '',
+        id: record.code, // Use voucher code as ID
+        name: record.recipient_name || 'Khách hàng',
+        phone: record.recipient_phone || '',
+        email: record.recipient_email || '',
+        date: record.created_at || new Date().toISOString(),
+        status: record.voucher_used ? 'used' : 'sent',
+        voucherCode: record.code || '',
       }));
     } catch (error) {
       console.error('Error in getRecentReferrals:', error);
