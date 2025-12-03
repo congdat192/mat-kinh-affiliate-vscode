@@ -606,3 +606,41 @@ EXECUTE FUNCTION affiliate.sync_voucher_tracking_commission_status();
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 14. Admin Delete F0 Feature (2025-12-03)
+
+### Overview
+Admin có thể xóa hoàn toàn F0 Partner từ ERP Admin Portal. Khi F0 bị xóa, tất cả session của F0 đó trên Portal này sẽ bị invalid.
+
+### Impact on F0 Portal
+- **Auto Logout**: Khi Admin xóa F0, `auth.users` record bị xóa → F0 đang đăng nhập sẽ bị logout tự động
+- **Data Loss**: Tất cả dữ liệu liên quan bị xóa vĩnh viễn (referrals, commissions, vouchers, etc.)
+- **Avatar**: URL avatar có thể vẫn accessible 1-24 giờ do CDN caching
+
+### RPC Function (Called from ERP Admin)
+```sql
+api.delete_f0_partner_cascade(p_f0_id UUID)
+```
+
+### Cascade Delete Tables
+1. `affiliate.referral_links`
+2. `affiliate.voucher_affiliate_tracking`
+3. `affiliate.f1_customer_assignments`
+4. `affiliate.commission_records`
+5. `affiliate.commission_history`
+6. `affiliate.withdrawal_requests`
+7. `affiliate.notifications`
+8. `affiliate.otp_verifications`
+9. `affiliate.password_resets`
+10. `affiliate.payment_batches`
+11. `auth.users`
+12. `storage.objects` (avatars)
+13. `affiliate.f0_partners`
+
+### Error Handling (F0 Portal)
+Khi F0 bị xóa nhưng session chưa expired:
+- Supabase queries sẽ return empty/null
+- Auth context sẽ detect invalid session
+- User redirected to login page
