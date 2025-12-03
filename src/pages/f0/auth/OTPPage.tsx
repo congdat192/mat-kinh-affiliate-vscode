@@ -21,7 +21,9 @@ export default function OTPPage() {
 
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
-  const [countdown, setCountdown] = useState(60);
+  const [isResending, setIsResending] = useState(false);
+  // Use expires_in from server (default 300s = 5 minutes if not provided)
+  const [countdown, setCountdown] = useState(state?.expires_in || 300);
   const [canResend, setCanResend] = useState(false);
   const [apiError, setApiError] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
@@ -138,17 +140,52 @@ export default function OTPPage() {
   };
 
   const handleResend = async () => {
-    if (!canResend || !state) return;
+    if (!canResend || !state || isResending) return;
 
-    setCanResend(false);
-    setCountdown(60);
-    setOtp(['', '', '', '', '', '']);
+    setIsResending(true);
     setApiError('');
-    inputRefs.current[0]?.focus();
 
-    // Note: In a full implementation, you would call an API to resend OTP
-    // For now, user needs to go back to signup page
-    setApiError('Vui lòng quay lại trang đăng ký để gửi lại OTP');
+    try {
+      // Call Edge Function to resend OTP
+      const { data, error } = await supabase.functions.invoke('send-otp-affiliate', {
+        body: {
+          phone: state.phone,
+          resend: true,
+          previous_record_id: state.record_id
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message || 'Có lỗi xảy ra');
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || 'Không thể gửi lại OTP');
+      }
+
+      // Reset state with new record_id and countdown
+      setCanResend(false);
+      setCountdown(data.expires_in || 300);
+      setOtp(['', '', '', '', '', '']);
+      inputRefs.current[0]?.focus();
+
+      // Update location state with new record_id
+      navigate('/f0/auth/otp', {
+        state: {
+          record_id: data.record_id,
+          phone: state.phone,
+          phone_masked: state.phone_masked,
+          expires_in: data.expires_in || 300
+        },
+        replace: true
+      });
+
+    } catch (err: any) {
+      console.error('Resend OTP error:', err);
+      setApiError(err.message || 'Không thể gửi lại mã OTP. Vui lòng thử lại.');
+    } finally {
+      setIsResending(false);
+    }
   };
 
   const isOtpComplete = otp.every(digit => digit !== '');
@@ -282,15 +319,17 @@ export default function OTPPage() {
                 <button
                   type="button"
                   onClick={handleResend}
-                  disabled={!canResend || isLoading}
+                  disabled={!canResend || isLoading || isResending}
                   className={cn(
                     'text-sm font-medium transition-colors',
-                    canResend && !isLoading
+                    canResend && !isLoading && !isResending
                       ? 'text-primary-500 hover:underline cursor-pointer'
                       : 'text-gray-400 cursor-not-allowed'
                   )}
                 >
-                  {canResend ? (
+                  {isResending ? (
+                    'Đang gửi lại...'
+                  ) : canResend ? (
                     'Gửi lại mã OTP'
                   ) : (
                     `Gửi lại sau ${countdown}s`

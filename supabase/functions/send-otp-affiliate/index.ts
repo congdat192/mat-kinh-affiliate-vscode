@@ -62,18 +62,29 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { phone, email, full_name, password, referral_code } = body;
+    const { phone, email, full_name, password, referral_code, resend, previous_record_id } = body;
 
-    // Validate required fields
-    if (!phone || !email || !full_name || !password) {
-      return errorResponse('Vui lòng điền đầy đủ thông tin', 'MISSING_FIELDS', 400, {
-        missing: {
-          phone: !phone,
-          email: !email,
-          full_name: !full_name,
-          password: !password
-        }
-      });
+    // Check if this is a resend request
+    const isResend = resend === true && previous_record_id;
+
+    // Validate required fields (different for resend vs new registration)
+    if (isResend) {
+      if (!phone) {
+        return errorResponse('Thiếu số điện thoại', 'MISSING_PHONE', 400, {
+          missing: { phone: true }
+        });
+      }
+    } else {
+      if (!phone || !email || !full_name || !password) {
+        return errorResponse('Vui lòng điền đầy đủ thông tin', 'MISSING_FIELDS', 400, {
+          missing: {
+            phone: !phone,
+            email: !email,
+            full_name: !full_name,
+            password: !password
+          }
+        });
+      }
     }
 
     // Validate phone format
@@ -103,50 +114,102 @@ Deno.serve(async (req) => {
       db: { schema: 'api' }
     });
 
-    // Check if phone already exists
-    const { data: existingPhone, error: phoneCheckError } = await supabase
-      .from('f0_partners')
-      .select('id')
-      .eq('phone', phone)
-      .single();
+    // Variables to hold registration data (either from request or previous OTP record)
+    let registrationEmail = email;
+    let registrationFullName = full_name;
+    let registrationPassword = password;
+    let registrationReferralCode = referral_code;
 
-    if (phoneCheckError && phoneCheckError.code !== 'PGRST116') {
-      console.error('[Database] Phone check error:', JSON.stringify(phoneCheckError));
-      return errorResponse('Lỗi kiểm tra số điện thoại', 'PHONE_CHECK_ERROR', 500, {
-        code: phoneCheckError.code,
-        message: phoneCheckError.message,
-        details: phoneCheckError.details
-      });
+    // For resend: Get registration data from previous OTP record
+    if (isResend) {
+      console.log(`[Resend] Looking up previous OTP record: ${previous_record_id}`);
+
+      const { data: previousOtp, error: previousOtpError } = await supabase
+        .from('otp_verifications')
+        .select('registration_data')
+        .eq('id', previous_record_id)
+        .eq('phone', phone)
+        .single();
+
+      if (previousOtpError || !previousOtp) {
+        console.error('[Resend] Previous OTP not found:', previousOtpError);
+        return errorResponse('Không tìm thấy thông tin đăng ký trước đó. Vui lòng đăng ký lại.', 'PREVIOUS_OTP_NOT_FOUND', 400, {
+          previous_record_id,
+          phone
+        });
+      }
+
+      // Extract registration data from previous record
+      const prevRegData = previousOtp.registration_data;
+      registrationEmail = prevRegData?.email;
+      registrationFullName = prevRegData?.full_name;
+      registrationPassword = prevRegData?.password;
+      registrationReferralCode = prevRegData?.referral_code;
+
+      if (!registrationEmail || !registrationFullName || !registrationPassword) {
+        console.error('[Resend] Incomplete registration data in previous record');
+        return errorResponse('Thông tin đăng ký không đầy đủ. Vui lòng đăng ký lại.', 'INCOMPLETE_REGISTRATION_DATA', 400, {
+          has_email: !!registrationEmail,
+          has_full_name: !!registrationFullName,
+          has_password: !!registrationPassword
+        });
+      }
+
+      // Mark previous OTP as used to prevent reuse
+      await supabase
+        .from('otp_verifications')
+        .update({ is_used: true })
+        .eq('id', previous_record_id);
+
+      console.log(`[Resend] Using registration data from previous OTP for: ${registrationEmail}`);
     }
 
-    if (existingPhone) {
-      return errorResponse('Số điện thoại đã được đăng ký', 'PHONE_EXISTS', 400, {
-        phone,
-        existing_id: existingPhone.id
-      });
-    }
+    // Check if phone already exists in f0_partners (skip for resend since we already validated on first send)
+    if (!isResend) {
+      const { data: existingPhone, error: phoneCheckError } = await supabase
+        .from('f0_partners')
+        .select('id')
+        .eq('phone', phone)
+        .single();
 
-    // Check if email already exists
-    const { data: existingEmail, error: emailCheckError } = await supabase
-      .from('f0_partners')
-      .select('id')
-      .eq('email', email)
-      .single();
+      if (phoneCheckError && phoneCheckError.code !== 'PGRST116') {
+        console.error('[Database] Phone check error:', JSON.stringify(phoneCheckError));
+        return errorResponse('Lỗi kiểm tra số điện thoại', 'PHONE_CHECK_ERROR', 500, {
+          code: phoneCheckError.code,
+          message: phoneCheckError.message,
+          details: phoneCheckError.details
+        });
+      }
 
-    if (emailCheckError && emailCheckError.code !== 'PGRST116') {
-      console.error('[Database] Email check error:', JSON.stringify(emailCheckError));
-      return errorResponse('Lỗi kiểm tra email', 'EMAIL_CHECK_ERROR', 500, {
-        code: emailCheckError.code,
-        message: emailCheckError.message,
-        details: emailCheckError.details
-      });
-    }
+      if (existingPhone) {
+        return errorResponse('Số điện thoại đã được đăng ký', 'PHONE_EXISTS', 400, {
+          phone,
+          existing_id: existingPhone.id
+        });
+      }
 
-    if (existingEmail) {
-      return errorResponse('Email đã được đăng ký', 'EMAIL_EXISTS', 400, {
-        email,
-        existing_id: existingEmail.id
-      });
+      // Check if email already exists
+      const { data: existingEmail, error: emailCheckError } = await supabase
+        .from('f0_partners')
+        .select('id')
+        .eq('email', registrationEmail)
+        .single();
+
+      if (emailCheckError && emailCheckError.code !== 'PGRST116') {
+        console.error('[Database] Email check error:', JSON.stringify(emailCheckError));
+        return errorResponse('Lỗi kiểm tra email', 'EMAIL_CHECK_ERROR', 500, {
+          code: emailCheckError.code,
+          message: emailCheckError.message,
+          details: emailCheckError.details
+        });
+      }
+
+      if (existingEmail) {
+        return errorResponse('Email đã được đăng ký', 'EMAIL_EXISTS', 400, {
+          email: registrationEmail,
+          existing_id: existingEmail.id
+        });
+      }
     }
 
     // Get Vihat credentials via RPC function
@@ -198,17 +261,17 @@ Deno.serve(async (req) => {
     const minute = 5;
     const expiresAt = new Date(Date.now() + minute * 60 * 1000);
 
-    // Save OTP record
+    // Save OTP record (use registration data variables which may be from previous record for resend)
     const { data: otpRecord, error: otpError } = await supabase
       .from('otp_verifications')
       .insert({
         phone,
         otp_code: otpCode,
         registration_data: {
-          email,
-          full_name,
-          password,
-          referral_code: referral_code || null
+          email: registrationEmail,
+          full_name: registrationFullName,
+          password: registrationPassword,
+          referral_code: registrationReferralCode || null
         },
         expires_at: expiresAt.toISOString(),
         is_used: false

@@ -19,6 +19,8 @@ import {
   Wallet,
   Repeat,
   Link2,
+  Lock,
+  CreditCard,
 } from 'lucide-react';
 import { toast } from '@/components/ui/toast';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -57,6 +59,13 @@ interface CommissionInfo {
   totalCommission: number;
   status: string;
   breakdown: CommissionBreakdown;
+  // v5: Lock/payment status fields
+  qualifiedAt: string | null;
+  lockDate: string | null;
+  lockedAt: string | null;
+  paidAt: string | null;
+  daysUntilLock: number | null;
+  invoiceCancelledAt: string | null;
 }
 
 interface InvoiceInfo {
@@ -349,39 +358,51 @@ const ReferralHistoryPage = () => {
     setShowDetailModal(true);
   };
 
-  // Summary cards data
+  // Calculate total revenue from used referrals - exclude cancelled invoices
+  const totalRevenue = referrals.reduce((sum, ref) => {
+    // Only count if invoice exists AND invoice is not cancelled AND commission is valid
+    if (ref.invoiceInfo?.invoiceAmount &&
+        ref.invoiceInfo.invoiceStatus !== 'Đã hủy' &&
+        ref.commissionStatus !== 'invalid') {
+      return sum + ref.invoiceInfo.invoiceAmount;
+    }
+    return sum;
+  }, 0);
+
+  // Summary cards data - Updated labels per user feedback
   const summaryCards = [
     {
-      title: 'Tổng Giới Thiệu',
+      title: 'Voucher Đã Phát',
       value: summary.total,
       subValue: `${summary.thisMonth} tháng này`,
-      icon: Users,
+      icon: Gift,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
-    },
-    {
-      title: 'F1 Gắn Kết',
-      value: summary.f1Assigned || 0,
-      subValue: 'Khách hàng trọn đời',
-      icon: Link2,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50',
-    },
-    {
-      title: 'HH Trọn Đời',
-      value: summary.lifetime?.count || 0,
-      subValue: formatCurrency(summary.lifetime?.total || 0),
-      icon: Repeat,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
     },
     {
       title: 'Đã Sử Dụng',
       value: summary.used,
       subValue: 'Voucher đã dùng',
+      icon: CheckCircle,
+      color: 'text-green-600',
+      bgColor: 'bg-green-50',
+    },
+    {
+      title: 'Tổng Doanh Số',
+      value: formatCurrency(totalRevenue),
+      subValue: 'Doanh số từ F1',
       icon: DollarSign,
       color: 'text-yellow-600',
       bgColor: 'bg-yellow-50',
+      isFormatted: true, // Flag to indicate value is already formatted
+    },
+    {
+      title: 'Hoa Hồng Trọn Đời',
+      value: summary.lifetime?.count || 0,
+      subValue: formatCurrency(summary.lifetime?.total || 0),
+      icon: Repeat,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50',
     },
   ];
 
@@ -407,7 +428,7 @@ const ReferralHistoryPage = () => {
               Lịch Sử Giới Thiệu
             </h1>
             <p className="text-gray-600 mt-1">
-              Theo dõi và quản lý tất cả khách hàng được giới thiệu
+              Theo dõi voucher đã phát và doanh số từ khách hàng F1
             </p>
           </div>
           <Button
@@ -425,18 +446,19 @@ const ReferralHistoryPage = () => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {summaryCards.map((stat, index) => {
             const Icon = stat.icon;
+            const isFormatted = 'isFormatted' in stat && stat.isFormatted;
             return (
               <Card key={index} className="hover:shadow-md transition-shadow">
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-xs md:text-sm font-medium text-gray-600">{stat.title}</p>
-                      <p className="text-xl md:text-2xl font-bold text-gray-900 mt-1">
+                      <p className={`font-bold text-gray-900 mt-1 ${isFormatted ? 'text-base md:text-lg truncate' : 'text-xl md:text-2xl'}`}>
                         {stat.value}
                       </p>
                       <p className="text-xs text-gray-500 mt-1">{stat.subValue}</p>
                     </div>
-                    <div className={`${stat.bgColor} p-2 md:p-3 rounded-lg`}>
+                    <div className={`${stat.bgColor} p-2 md:p-3 rounded-lg flex-shrink-0`}>
                       <Icon className={`w-5 h-5 md:w-6 md:h-6 ${stat.color}`} />
                     </div>
                   </div>
@@ -542,8 +564,8 @@ const ReferralHistoryPage = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            <Users className="w-4 h-4 inline-block mr-2" />
-            Giới Thiệu Voucher ({summary.total})
+            <Gift className="w-4 h-4 inline-block mr-2" />
+            Voucher Đã Phát ({summary.total})
           </button>
           <button
             onClick={() => setActiveTab('lifetime')}
@@ -563,7 +585,7 @@ const ReferralHistoryPage = () => {
         <Card>
           <CardHeader>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <CardTitle>Danh Sách Giới Thiệu</CardTitle>
+              <CardTitle>Danh Sách Voucher Đã Phát</CardTitle>
               <Button
                 variant="outline"
                 onClick={handleExportExcel}
@@ -577,8 +599,8 @@ const ReferralHistoryPage = () => {
           <CardContent>
             {referrals.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
-                <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-lg font-medium">Chưa có giới thiệu nào</p>
+                <Gift className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">Chưa có voucher nào được phát</p>
                 <p className="text-sm mt-1">Bắt đầu giới thiệu khách hàng để nhận hoa hồng</p>
                 <Button
                   variant="outline"
@@ -601,6 +623,8 @@ const ReferralHistoryPage = () => {
                         <TableHead>Đơn Hàng</TableHead>
                         <TableHead>Điều Kiện</TableHead>
                         <TableHead>Hoa Hồng</TableHead>
+                        <TableHead>Trạng Thái Chốt</TableHead>
+                        <TableHead>Thanh Toán</TableHead>
                         <TableHead className="text-center">Thao Tác</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -672,20 +696,63 @@ const ReferralHistoryPage = () => {
                               <span className="text-gray-400 text-xs">Chưa mua</span>
                             )}
                           </TableCell>
+                          {/* Hoa Hồng column - v5: Chỉ hiển thị badge "Không hợp lệ" */}
                           <TableCell>
                             {referral.commissionInfo ? (
                               <div className="text-sm">
                                 <p className="font-medium text-primary-600">
                                   {formatCurrency(referral.commissionInfo.totalCommission)}
                                 </p>
-                                <Badge variant={getCommissionStatusVariant(referral.commissionStatus)}>
-                                  {getCommissionStatusText(referral.commissionStatus)}
-                                </Badge>
+                                {/* Chỉ hiển thị badge nếu là "Không hợp lệ" */}
+                                {referral.commissionStatus === 'invalid' && (
+                                  <Badge variant="danger">Không hợp lệ</Badge>
+                                )}
                               </div>
+                            ) : referral.commissionStatus === 'invalid' ? (
+                              <Badge variant="danger">Không hợp lệ</Badge>
                             ) : (
-                              <Badge variant={getCommissionStatusVariant(referral.commissionStatus)}>
-                                {getCommissionStatusText(referral.commissionStatus)}
+                              <span className="text-gray-400 text-xs">--</span>
+                            )}
+                          </TableCell>
+                          {/* Trạng Thái Chốt column - v5 */}
+                          <TableCell>
+                            {referral.commissionInfo?.lockedAt ? (
+                              <Badge variant="info" className="flex items-center gap-1 w-fit">
+                                <Lock className="w-3 h-3" />
+                                Đã chốt
                               </Badge>
+                            ) : referral.commissionInfo?.lockDate ? (
+                              <div className="text-sm">
+                                <Badge variant="warning" className="flex items-center gap-1 w-fit">
+                                  <Clock className="w-3 h-3" />
+                                  Chờ chốt
+                                </Badge>
+                                {referral.commissionInfo.daysUntilLock !== null && referral.commissionInfo.daysUntilLock >= 0 && (
+                                  <span className="text-xs text-gray-500 mt-1 block">
+                                    Còn {referral.commissionInfo.daysUntilLock} ngày
+                                  </span>
+                                )}
+                              </div>
+                            ) : referral.invoiceInfo && referral.commissionStatus !== 'invalid' ? (
+                              <span className="text-xs text-gray-400">Chưa đủ ĐK</span>
+                            ) : (
+                              <span className="text-gray-400">--</span>
+                            )}
+                          </TableCell>
+                          {/* Thanh Toán column - v5 */}
+                          <TableCell>
+                            {referral.commissionInfo?.paidAt ? (
+                              <Badge variant="success" className="flex items-center gap-1 w-fit">
+                                <CreditCard className="w-3 h-3" />
+                                Đã TT
+                              </Badge>
+                            ) : referral.commissionInfo?.lockedAt ? (
+                              <Badge variant="warning" className="flex items-center gap-1 w-fit">
+                                <Clock className="w-3 h-3" />
+                                Chưa TT
+                              </Badge>
+                            ) : (
+                              <span className="text-gray-400">--</span>
                             )}
                           </TableCell>
                           <TableCell className="text-center">

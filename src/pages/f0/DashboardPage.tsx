@@ -15,6 +15,7 @@ import {
   Lock,
   CheckCircle2,
   Calendar,
+  Gift,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -273,10 +274,10 @@ const DashboardPage = () => {
   // Statistics cards data - Updated for Lock System v16
   const statsCards = [
     {
-      title: 'Tổng giới thiệu',
+      title: 'Voucher đã phát',
       value: stats.totalReferrals,
       subValue: `${stats.referralsThisQuarter} đủ điều kiện`,
-      icon: Users,
+      icon: Gift,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
     },
@@ -667,19 +668,19 @@ const DashboardPage = () => {
         <Card>
           <CardHeader>
             <CardTitle>Hoạt động gần đây</CardTitle>
-            <CardDescription>5 giới thiệu gần nhất của bạn</CardDescription>
+            <CardDescription>5 voucher phát gần nhất của bạn</CardDescription>
           </CardHeader>
           <CardContent>
             {recentActivity.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>Chưa có hoạt động giới thiệu nào</p>
+                <Gift className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                <p>Chưa có voucher nào được phát</p>
                 <Button
                   variant="outline"
                   className="mt-4"
                   onClick={() => navigate('/f0/refer-customer')}
                 >
-                  Giới thiệu khách hàng đầu tiên
+                  Phát voucher đầu tiên
                 </Button>
               </div>
             ) : (
@@ -724,7 +725,7 @@ const DashboardPage = () => {
                     variant="outline"
                     onClick={() => navigate('/f0/referral-history')}
                   >
-                    Xem tất cả giới thiệu
+                    Xem tất cả voucher đã phát
                   </Button>
                 </div>
               </>

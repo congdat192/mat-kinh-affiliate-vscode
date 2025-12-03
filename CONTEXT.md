@@ -450,3 +450,159 @@ F0 receives payment (bank transfer / cash)
 | `get-f0-referral-history` | Complex: 4 joins, nested response |
 | `manage-withdrawal-request` | Business logic validation |
 | `send-otp-*`, `verify-otp-*` | External API / Security |
+
+---
+
+## 12. ReferralHistoryPage Lock & Payment Display (v5)
+
+### Overview
+Trang Lịch Sử Giới Thiệu hiển thị thêm 2 cột mới: "Trạng Thái Chốt" và "Thanh Toán" dựa trên dữ liệu từ `commission_records`.
+
+### UI Columns
+| Column | Data Source | Display Logic |
+|--------|-------------|---------------|
+| Trạng Thái Chốt | `commissionInfo.lockedAt` | Đã chốt (blue badge) / Chờ chốt (yellow badge + countdown) / Chưa đủ ĐK |
+| Thanh Toán | `commissionInfo.paidAt` | Đã TT (green badge) / Chưa TT (yellow badge) / -- |
+
+### Data Flow
+```
+get-f0-referral-history Edge Function (v5)
+         ↓
+Queries api.voucher_affiliate_tracking
+         ↓
+LEFT JOIN api.commission_records ON voucher_code
+         ↓
+Returns commissionInfo: {
+  lockedAt: string | null,   // Từ commission_records.locked_at
+  paidAt: string | null,     // Từ commission_records.paid_at
+  qualifiedAt, lockDate, daysUntilLock...
+}
+         ↓
+ReferralHistoryPage.tsx displays badges based on values
+```
+
+### Badge Display Logic
+```typescript
+// Trạng Thái Chốt column
+if (referral.commissionInfo?.lockedAt) {
+  <Badge variant="info"><Lock /> Đã chốt</Badge>
+} else if (referral.commissionInfo?.lockDate) {
+  <Badge variant="warning"><Clock /> Chờ chốt</Badge>
+  // + "Còn X ngày" countdown
+} else if (hasInvoice && !invalid) {
+  <span>Chưa đủ ĐK</span>
+}
+
+// Thanh Toán column
+if (referral.commissionInfo?.paidAt) {
+  <Badge variant="success"><CreditCard /> Đã TT</Badge>
+} else if (referral.commissionInfo?.lockedAt) {
+  <Badge variant="warning"><Clock /> Chưa TT</Badge>
+}
+```
+
+### Interface Updates
+```typescript
+interface CommissionInfo {
+  totalCommission: number;
+  status: string;
+  breakdown: CommissionBreakdown;
+  // v5: Lock/payment status fields
+  qualifiedAt: string | null;
+  lockDate: string | null;
+  lockedAt: string | null;      // NEW: Timestamp when commission was locked
+  paidAt: string | null;        // NEW: Timestamp when commission was paid
+  daysUntilLock: number | null;
+  invoiceCancelledAt: string | null;
+}
+```
+
+---
+
+## 13. Database Trigger Fixes (2025-12-03)
+
+### Fix 1: VIEW Update Trigger - Missing Payment Columns
+**Problem:** Trigger function `api.commission_records_update_trigger()` không cập nhật các cột payment khi UPDATE qua VIEW.
+
+**Root Cause:** Các cột sau bị thiếu trong trigger:
+- `paid_at`, `paid_by`, `paid_by_name`, `payment_batch_id`
+- `locked_at`, `locked_by`, `locked_by_name`
+
+**Solution:** Updated trigger function to include all payment/lock columns:
+```sql
+-- Migration: fix_commission_records_update_trigger_add_payment_columns
+CREATE OR REPLACE FUNCTION api.commission_records_update_trigger()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  UPDATE affiliate.commission_records SET
+    -- ... existing columns ...
+    -- PAYMENT COLUMNS (ADDED)
+    paid_at = NEW.paid_at,
+    paid_by = NEW.paid_by,
+    paid_by_name = NEW.paid_by_name,
+    payment_batch_id = NEW.payment_batch_id,
+    -- LOCK COLUMNS (ADDED)
+    locked_at = NEW.locked_at,
+    locked_by = NEW.locked_by,
+    locked_by_name = NEW.locked_by_name,
+    updated_at = now()
+  WHERE id = OLD.id;
+  RETURN NEW;
+END;
+$$;
+```
+
+### Fix 2: Auto-Sync commission_status Between Tables
+**Problem:** `commission_records.status` và `voucher_affiliate_tracking.commission_status` không đồng bộ.
+
+**Solution:** Created new trigger to sync status changes:
+```sql
+-- Migration: add_trigger_sync_voucher_tracking_commission_status
+CREATE FUNCTION affiliate.sync_voucher_tracking_commission_status()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    UPDATE affiliate.voucher_affiliate_tracking
+    SET commission_status = NEW.status, updated_at = now()
+    WHERE code = NEW.voucher_code;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER sync_voucher_tracking_on_status_change
+AFTER UPDATE OF status ON affiliate.commission_records
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION affiliate.sync_voucher_tracking_commission_status();
+```
+
+### Data Sync Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATA SYNC FLOW                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  admin-process-payment-batch (Edge Function)                    │
+│         │                                                       │
+│         ▼                                                       │
+│  UPDATE api.commission_records (VIEW)                           │
+│         │                                                       │
+│         ▼                                                       │
+│  INSTEAD OF UPDATE trigger                                      │
+│         │                                                       │
+│         ▼                                                       │
+│  affiliate.commission_records (TABLE)                           │
+│    - status = 'paid'                                            │
+│    - paid_at = NOW()                                            │
+│    - payment_batch_id = batchId                                 │
+│         │                                                       │
+│         ▼                                                       │
+│  sync_voucher_tracking_on_status_change trigger                 │
+│         │                                                       │
+│         ▼                                                       │
+│  affiliate.voucher_affiliate_tracking                           │
+│    - commission_status = 'paid'                                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
