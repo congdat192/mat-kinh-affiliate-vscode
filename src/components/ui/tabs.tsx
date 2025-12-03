@@ -17,7 +17,7 @@ const useTabsContext = () => {
 };
 
 interface TabsProps {
-  defaultValue: string;
+  defaultValue?: string;
   value?: string;
   onValueChange?: (value: string) => void;
   children: React.ReactNode;
@@ -31,7 +31,7 @@ export const Tabs: React.FC<TabsProps> = ({
   children,
   className,
 }) => {
-  const [internalValue, setInternalValue] = React.useState(defaultValue);
+  const [internalValue, setInternalValue] = React.useState(defaultValue || '');
   const value = controlledValue ?? internalValue;
 
   const handleValueChange = (newValue: string) => {
