@@ -98,10 +98,14 @@ mat-kinh-affiliate-vscode/
 - Services handle API calls, components handle UI
 - Toast notifications via `@/components/ui/toast`
 
-### Commission Logic (v16 Lock System + v17 Dynamic Settings)
+### Commission Logic (v16 Lock System + v17 Dynamic Settings + v18 Hours/Minutes)
 - Revenue counted only when `total = totalpayment` (fully paid)
 - **Commission status flow**: `pending` → `locked` → `paid`
-- **Lock period**: Configurable via `api.lock_payment_settings.lock_period_days` (default: 20 days)
+- **Lock period**: Configurable via `api.lock_payment_settings`:
+  - `lock_period_days` (default: 0)
+  - `lock_period_hours` (default: 24) - **v18 added**
+  - `lock_period_minutes` (default: 0) - **v18 added**
+  - Total lock period = days + hours + minutes
 - **Payment day**: Configurable via `api.lock_payment_settings.payment_day` (default: 5th of month)
 - **Tier calculation**: Only counts `locked` + `paid` commissions (NOT pending)
 - **Admin payment**: Batch payment on configured day via `admin-process-payment-batch`
@@ -177,7 +181,7 @@ Tables synced from KiotViet POS via webhook:
 |----------|---------|-------------|
 | `create-referral-link` | v3 | Creates referral link with realtime conversion count |
 | `create-and-release-voucher-affiliate-internal` | v9 | Issues voucher for F1 customer claim |
-| `webhook-affiliate-check-voucher-invoice` | v10 | Handles KiotViet invoice webhook for commission calculation (lock system v16) |
+| `webhook-affiliate-check-voucher-invoice` | v15 | Handles KiotViet invoice webhook for commission calculation (lock system v16 + hours/minutes v15) |
 | `cron-affiliate-commission-sync` | v1 | Backup cron job for missed webhooks (runs every 15 min) |
 | `cron-lock-commissions` | v1 | Locks pending commissions after 15-day period (runs daily at 1:00 AM) |
 | `admin-process-payment-batch` | v2 | Admin batch payment with selective F0 support (monthly/selective modes) |
@@ -726,3 +730,96 @@ schedule: '*/30 * * * *'
 - **Dashboard**: Stats now correct immediately after lock_date passes
 - **WithdrawalPage**: Auto-fixed (uses same `get-f0-dashboard-stats`)
 - **MyCustomersPage**: UI now matches ReferralHistoryPage exactly
+
+---
+
+## 16. Lock Period Hours/Minutes Support (2025-12-04)
+
+### Related Plan
+- `PLAN-FIX-LOCK-HOURS-MINUTES.md` (ERP-FE-fresh project)
+
+### Problem
+Edge Function `webhook-affiliate-check-voucher-invoice` chỉ đọc `lock_period_days`, không đọc `lock_period_hours` và `lock_period_minutes` từ database, dẫn đến lock_date được tính sai.
+
+### Solution
+Updated Edge Function v15 to support hours and minutes:
+
+**Interface Updated:**
+```typescript
+interface LockPeriodSettings {
+  lock_period_days: number;
+  lock_period_hours: number;
+  lock_period_minutes: number;
+}
+```
+
+**getLockPeriodSettings() Updated:**
+```typescript
+async function getLockPeriodSettings(supabase: any): Promise<LockPeriodSettings> {
+  const { data, error } = await supabase
+    .from('lock_payment_settings')
+    .select('lock_period_days, lock_period_hours, lock_period_minutes')
+    .eq('is_active', true)
+    .single();
+
+  if (error || !data) {
+    return { lock_period_days: 0, lock_period_hours: 24, lock_period_minutes: 0 };
+  }
+
+  return {
+    lock_period_days: data.lock_period_days ?? 0,
+    lock_period_hours: data.lock_period_hours ?? 24,
+    lock_period_minutes: data.lock_period_minutes ?? 0
+  };
+}
+```
+
+**calculateLockDate() Updated:**
+```typescript
+function calculateLockDate(qualifiedAt: Date, settings: LockPeriodSettings): Date {
+  const lockDate = new Date(qualifiedAt);
+  if (settings.lock_period_days > 0) lockDate.setDate(lockDate.getDate() + settings.lock_period_days);
+  if (settings.lock_period_hours > 0) lockDate.setHours(lockDate.getHours() + settings.lock_period_hours);
+  if (settings.lock_period_minutes > 0) lockDate.setMinutes(lockDate.getMinutes() + settings.lock_period_minutes);
+  return lockDate;
+}
+```
+
+**formatLockPeriod() Helper (NEW):**
+```typescript
+function formatLockPeriod(settings: LockPeriodSettings): string {
+  const parts: string[] = [];
+  if (settings.lock_period_days > 0) parts.push(`${settings.lock_period_days} ngày`);
+  if (settings.lock_period_hours > 0) parts.push(`${settings.lock_period_hours} giờ`);
+  if (settings.lock_period_minutes > 0) parts.push(`${settings.lock_period_minutes} phút`);
+  return parts.length > 0 ? parts.join(' ') : '0 phút';
+}
+```
+
+### Other Changes
+- Changed `commission_status` from `'available'` to `'pending'` in commonFields (for NEW LOCK SYSTEM)
+- Notification messages now use dynamic `lockPeriodText` instead of hardcoded days
+
+### Files Changed
+| File | Version | Changes |
+|------|---------|---------|
+| `webhook-affiliate-check-voucher-invoice` | v15 | Support hours/minutes, formatLockPeriod helper |
+| `f1Customer.ts` | - | Added 'available', 'invalid' to CommissionStatus type |
+| `f1CustomerService.ts` | - | Added v17 fields (pending_orders, locked_orders, etc.) |
+| `ReferralHistoryPage.tsx` | - | Added 'cancelled', 'locked' to commissionStatus type |
+
+### Database Table
+`api.lock_payment_settings`:
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `lock_period_days` | INT | 0 | Days to add to lock period |
+| `lock_period_hours` | INT | 24 | Hours to add to lock period |
+| `lock_period_minutes` | INT | 0 | Minutes to add to lock period |
+| `payment_day` | INT | 5 | Day of month for payment |
+| `is_active` | BOOLEAN | true | Active settings row |
+
+### Testing
+To verify fix works:
+1. Set `lock_period_minutes = 1` in admin settings
+2. Create new order with affiliate voucher
+3. Check `commission_records.lock_date` = `qualified_at + 1 minute`
