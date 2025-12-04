@@ -623,8 +623,7 @@ const ReferralHistoryPage = () => {
                         <TableHead>Đơn Hàng</TableHead>
                         <TableHead>Điều Kiện</TableHead>
                         <TableHead>Hoa Hồng</TableHead>
-                        <TableHead>Trạng Thái Chốt</TableHead>
-                        <TableHead>Thanh Toán</TableHead>
+                        <TableHead>Trạng Thái Hoa Hồng</TableHead>
                         <TableHead className="text-center">Thao Tác</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -670,7 +669,7 @@ const ReferralHistoryPage = () => {
                               <span className="text-gray-400">--</span>
                             )}
                           </TableCell>
-                          {/* Điều Kiện Column */}
+                          {/* Điều Kiện Column - v7: Thêm "Còn X ngày" */}
                           <TableCell>
                             {referral.commissionStatus === 'invalid' ? (
                               <div className="flex items-center gap-1">
@@ -682,7 +681,7 @@ const ReferralHistoryPage = () => {
                                    'Không hợp lệ'}
                                 </span>
                               </div>
-                            ) : referral.commissionStatus === 'available' || referral.commissionStatus === 'paid' ? (
+                            ) : referral.commissionStatus === 'paid' || referral.commissionInfo?.lockedAt ? (
                               <div className="flex items-center gap-1">
                                 <CheckCircle className="w-4 h-4 text-green-500" />
                                 <span className="text-xs text-green-600">Đủ điều kiện</span>
@@ -690,7 +689,13 @@ const ReferralHistoryPage = () => {
                             ) : referral.invoiceInfo ? (
                               <div className="flex items-center gap-1">
                                 <Clock className="w-4 h-4 text-yellow-500" />
-                                <span className="text-xs text-yellow-600">Chờ xử lý</span>
+                                <span className="text-xs text-yellow-600">
+                                  Chờ xử lý
+                                  {referral.commissionInfo?.daysUntilLock != null &&
+                                   referral.commissionInfo.daysUntilLock >= 0 && (
+                                    <span className="ml-1">({referral.commissionInfo.daysUntilLock} ngày)</span>
+                                  )}
+                                </span>
                               </div>
                             ) : (
                               <span className="text-gray-400 text-xs">Chưa mua</span>
@@ -714,42 +719,29 @@ const ReferralHistoryPage = () => {
                               <span className="text-gray-400 text-xs">--</span>
                             )}
                           </TableCell>
-                          {/* Trạng Thái Chốt column - v5 */}
-                          <TableCell>
-                            {referral.commissionInfo?.lockedAt ? (
-                              <Badge variant="info" className="flex items-center gap-1 w-fit">
-                                <Lock className="w-3 h-3" />
-                                Đã chốt
-                              </Badge>
-                            ) : referral.commissionInfo?.lockDate ? (
-                              <div className="text-sm">
-                                <Badge variant="warning" className="flex items-center gap-1 w-fit">
-                                  <Clock className="w-3 h-3" />
-                                  Chờ chốt
-                                </Badge>
-                                {referral.commissionInfo.daysUntilLock !== null && referral.commissionInfo.daysUntilLock >= 0 && (
-                                  <span className="text-xs text-gray-500 mt-1 block">
-                                    Còn {referral.commissionInfo.daysUntilLock} ngày
-                                  </span>
-                                )}
-                              </div>
-                            ) : referral.invoiceInfo && referral.commissionStatus !== 'invalid' ? (
-                              <span className="text-xs text-gray-400">Chưa đủ ĐK</span>
-                            ) : (
-                              <span className="text-gray-400">--</span>
-                            )}
-                          </TableCell>
-                          {/* Thanh Toán column - v5 */}
+                          {/* TT Hoa Hồng column - v7: Đơn giản hóa theo PLAN */}
                           <TableCell>
                             {referral.commissionInfo?.paidAt ? (
                               <Badge variant="success" className="flex items-center gap-1 w-fit">
-                                <CreditCard className="w-3 h-3" />
-                                Đã TT
+                                <CheckCircle className="w-3 h-3" />
+                                Đã thanh toán
+                              </Badge>
+                            ) : (referral.commissionStatus === 'cancelled' ||
+                                 referral.invalidReasonCode === 'INVOICE_CANCELLED' ||
+                                 referral.commissionInfo?.invoiceCancelledAt) ? (
+                              <Badge variant="danger" className="flex items-center gap-1 w-fit">
+                                <X className="w-3 h-3" />
+                                Đã hủy
                               </Badge>
                             ) : referral.commissionInfo?.lockedAt ? (
+                              <Badge variant="info" className="flex items-center gap-1 w-fit">
+                                <Lock className="w-3 h-3" />
+                                Chờ thanh toán
+                              </Badge>
+                            ) : referral.invoiceInfo ? (
                               <Badge variant="warning" className="flex items-center gap-1 w-fit">
                                 <Clock className="w-3 h-3" />
-                                Chưa TT
+                                Chờ xác nhận
                               </Badge>
                             ) : (
                               <span className="text-gray-400">--</span>

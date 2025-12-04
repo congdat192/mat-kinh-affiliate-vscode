@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-console.info('get-f0-my-customers v2 - List F1 customers for F0 (v16 lock system: locked_commission, cancelled_commission)');
+console.info('get-f0-my-customers v3 - List F1 customers for F0 (v17 revenue/orders breakdown by status)');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -67,9 +67,10 @@ Deno.serve(async (req) => {
     }
 
     // Calculate summary stats (from all customers, not just current page)
+    // v17: Include breakdown fields
     const { data: summaryData, error: summaryError } = await supabase
       .from('f1_customers_summary')
-      .select('total_orders, total_revenue, total_commission')
+      .select('total_orders, total_revenue, total_commission, pending_orders, locked_orders, paid_orders, pending_revenue, locked_revenue, paid_revenue')
       .eq('f0_id', f0_id)
       .eq('is_active', true);
 
@@ -77,16 +78,30 @@ Deno.serve(async (req) => {
       total_f1: count || 0,
       total_orders: 0,
       total_revenue: 0,
-      total_commission: 0
+      total_commission: 0,
+      // v17: Breakdown summaries
+      pending_orders: 0,
+      locked_orders: 0,
+      paid_orders: 0,
+      pending_revenue: 0,
+      locked_revenue: 0,
+      paid_revenue: 0
     };
 
     if (!summaryError && summaryData) {
       summary.total_orders = summaryData.reduce((sum, c) => sum + (c.total_orders || 0), 0);
       summary.total_revenue = summaryData.reduce((sum, c) => sum + Number(c.total_revenue || 0), 0);
       summary.total_commission = summaryData.reduce((sum, c) => sum + Number(c.total_commission || 0), 0);
+      // v17: Breakdown
+      summary.pending_orders = summaryData.reduce((sum, c) => sum + (c.pending_orders || 0), 0);
+      summary.locked_orders = summaryData.reduce((sum, c) => sum + (c.locked_orders || 0), 0);
+      summary.paid_orders = summaryData.reduce((sum, c) => sum + (c.paid_orders || 0), 0);
+      summary.pending_revenue = summaryData.reduce((sum, c) => sum + Number(c.pending_revenue || 0), 0);
+      summary.locked_revenue = summaryData.reduce((sum, c) => sum + Number(c.locked_revenue || 0), 0);
+      summary.paid_revenue = summaryData.reduce((sum, c) => sum + Number(c.paid_revenue || 0), 0);
     }
 
-    // Format response - v2: Added lock system fields
+    // Format response - v17: Added revenue/orders breakdown
     const formattedCustomers = (customers || []).map(c => ({
       assignment_id: c.assignment_id,
       f1_phone: c.f1_phone,
@@ -94,12 +109,20 @@ Deno.serve(async (req) => {
       f1_customer_id: c.f1_customer_id,
       assigned_at: c.assigned_at,
       first_voucher_code: c.first_voucher_code,
+      // v17: Orders breakdown
+      pending_orders: c.pending_orders || 0,
+      locked_orders: c.locked_orders || 0,
+      paid_orders: c.paid_orders || 0,
       total_orders: c.total_orders || 0,
+      // v17: Revenue breakdown
+      pending_revenue: Number(c.pending_revenue || 0),
+      locked_revenue: Number(c.locked_revenue || 0),
+      paid_revenue: Number(c.paid_revenue || 0),
       total_revenue: Number(c.total_revenue || 0),
+      // Commission breakdown
       total_commission: Number(c.total_commission || 0),
       paid_commission: Number(c.paid_commission || 0),
       pending_commission: Number(c.pending_commission || 0),
-      // v16: Lock system fields
       locked_commission: Number(c.locked_commission || 0),
       cancelled_commission: Number(c.cancelled_commission || 0),
       last_order_date: c.last_order_date,

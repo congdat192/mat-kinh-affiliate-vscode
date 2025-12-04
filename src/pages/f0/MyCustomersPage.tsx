@@ -87,50 +87,44 @@ const getAvatarColor = (name: string) => {
   return colors[index];
 };
 
-// Get commission status badge - Updated for Lock System v16
+// Get commission status badge - v7: Simplified labels per PLAN
+// Values: "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán", "Đã hủy"
 const getStatusBadge = (status: string, label: string, daysUntilLock?: number | null) => {
   switch (status) {
     case 'paid':
       return (
         <Badge variant="success" className="text-xs">
           <CheckCircle2 className="w-3 h-3 mr-1" />
-          {label}
+          Đã thanh toán
         </Badge>
       );
     case 'locked':
       return (
-        <Badge variant="default" className="text-xs bg-purple-100 text-purple-700 border-purple-200">
+        <Badge variant="default" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
           <Lock className="w-3 h-3 mr-1" />
-          {label}
+          Chờ thanh toán
         </Badge>
       );
     case 'pending':
+    case 'available': // Legacy support
       return (
         <Badge variant="warning" className="text-xs">
           <Clock className="w-3 h-3 mr-1" />
-          {label}{daysUntilLock !== null && daysUntilLock !== undefined && daysUntilLock > 0 ? ` (${daysUntilLock} ngày)` : ''}
+          Chờ xác nhận{daysUntilLock !== null && daysUntilLock !== undefined && daysUntilLock > 0 ? ` (${daysUntilLock} ngày)` : ''}
         </Badge>
       );
     case 'cancelled':
       return (
         <Badge variant="danger" className="text-xs">
           <XCircle className="w-3 h-3 mr-1" />
-          {label}
-        </Badge>
-      );
-    // Legacy support for 'available' status
-    case 'available':
-      return (
-        <Badge variant="default" className="text-xs bg-purple-100 text-purple-700 border-purple-200">
-          <Lock className="w-3 h-3 mr-1" />
-          Đã chốt
+          Đã hủy
         </Badge>
       );
     default:
       return (
         <Badge variant="default" className="text-xs text-gray-500">
           <Clock className="w-3 h-3 mr-1" />
-          {label || 'Chưa xác định'}
+          Chờ xác nhận
         </Badge>
       );
   }
@@ -287,26 +281,52 @@ const CustomerRow = memo(({
               </div>
             </div>
 
-            {/* Commission Breakdown - Lock System v16 */}
+            {/* v17: Revenue Breakdown - v7: Updated labels */}
+            <div className="mb-4">
+              <p className="text-gray-500 text-xs mb-2 flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" />
+                Doanh thu theo trạng thái
+              </p>
+              <div className="grid grid-cols-4 gap-3 text-sm">
+                <div className="bg-orange-50 p-2 rounded-lg border border-orange-100">
+                  <p className="text-orange-600 text-xs">Chờ xác nhận</p>
+                  <p className="font-semibold text-orange-600">{formatCurrencyFull(customer.pending_revenue || 0)}</p>
+                </div>
+                <div className="bg-blue-50 p-2 rounded-lg border border-blue-100">
+                  <p className="text-blue-600 text-xs">Chờ thanh toán</p>
+                  <p className="font-semibold text-blue-600">{formatCurrencyFull(customer.locked_revenue || 0)}</p>
+                </div>
+                <div className="bg-green-50 p-2 rounded-lg border border-green-100">
+                  <p className="text-green-600 text-xs">Đã thanh toán</p>
+                  <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_revenue || 0)}</p>
+                </div>
+                <div className="bg-gray-50 p-2 rounded-lg border">
+                  <p className="text-gray-500 text-xs">Tổng</p>
+                  <p className="font-semibold text-gray-900">{formatCurrencyFull(customer.total_revenue || 0)}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Commission Breakdown - v7: Updated labels per PLAN */}
             <div className="grid grid-cols-4 gap-3 text-sm">
               <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
                 <p className="text-orange-600 text-xs flex items-center gap-1">
                   <Clock className="w-3 h-3" />
-                  Chờ chốt
+                  Chờ xác nhận
                 </p>
                 <p className="font-semibold text-orange-600">{formatCurrencyFull(customer.pending_commission || 0)}</p>
               </div>
-              <div className="bg-purple-50 p-3 rounded-lg border border-purple-100">
-                <p className="text-purple-600 text-xs flex items-center gap-1">
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                <p className="text-blue-600 text-xs flex items-center gap-1">
                   <Lock className="w-3 h-3" />
-                  Đã chốt
+                  Chờ thanh toán
                 </p>
-                <p className="font-semibold text-purple-600">{formatCurrencyFull(customer.locked_commission || 0)}</p>
+                <p className="font-semibold text-blue-600">{formatCurrencyFull(customer.locked_commission || 0)}</p>
               </div>
               <div className="bg-green-50 p-3 rounded-lg border border-green-100">
                 <p className="text-green-600 text-xs flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3" />
-                  Đã nhận
+                  Đã thanh toán
                 </p>
                 <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_commission || 0)}</p>
               </div>
@@ -371,7 +391,15 @@ const MyCustomersPage = () => {
   const [customers, setCustomers] = useState<F1CustomerSummary[]>([]);
   const [summary, setSummary] = useState({
     total_f1: 0,
+    // v17: Orders breakdown by status
+    pending_orders: 0,
+    locked_orders: 0,
+    paid_orders: 0,
     total_orders: 0,
+    // v17: Revenue breakdown by status
+    pending_revenue: 0,
+    locked_revenue: 0,
+    paid_revenue: 0,
     total_revenue: 0,
     total_commission: 0,
   });
@@ -554,6 +582,24 @@ const MyCustomersPage = () => {
             <span className="font-semibold text-yellow-600">{summaryStats.totalCommission}đ</span>
           </div>
         </div>
+        {/* v17: Revenue breakdown detail - v7: Updated labels */}
+        {summary.total_revenue > 0 && (
+          <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t text-xs">
+            <span className="text-gray-400">Chi tiết doanh thu:</span>
+            <div className="flex items-center gap-1">
+              <Clock className="w-3 h-3 text-orange-500" />
+              <span className="text-orange-600">Chờ xác nhận: {formatCurrency(summary.pending_revenue)}đ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Lock className="w-3 h-3 text-blue-500" />
+              <span className="text-blue-600">Chờ thanh toán: {formatCurrency(summary.locked_revenue)}đ</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 text-green-500" />
+              <span className="text-green-600">Đã thanh toán: {formatCurrency(summary.paid_revenue)}đ</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search */}

@@ -289,7 +289,7 @@ F0 receives payment (bank transfer / cash)
 
 ### 2025-12-03 Session 3 (UI Cleanup)
 - **WithdrawalPage.tsx**: Removed duplicate Balance Summary Cards
-  - Removed lines 896-918 (3 cards: Chờ chốt, Đã chốt, Đã Nhận at top of page)
+  - Removed lines 896-918 (3 cards: Chờ xác thực, Đã xác thực, Đã Nhận at top of page)
   - These cards duplicated content already shown in "Tổng quan" tab (Overview Tab)
   - Now page goes directly from header → bank warning → tabs
 
@@ -351,7 +351,7 @@ F0 receives payment (bank transfer / cash)
   - `get-f1-customer-detail` v2: Added lock system fields (`qualified_at`, `lock_date`, `locked_at`, `days_until_lock`)
 - **F0 Portal Updates**:
   - `DashboardPage.tsx`: New commission status cards showing pending/locked/paid
-  - `MyCustomersPage.tsx`: Updated status badges with `days_until_lock` countdown, commission breakdown (Chờ chốt/Đã chốt/Đã nhận)
+  - `MyCustomersPage.tsx`: Updated status badges with `days_until_lock` countdown, commission breakdown (Chờ xác thực/Đã xác thực/Đã nhận)
   - `WithdrawalPage.tsx`: Converted to "Thanh Toán Hoa Hồng" (payment status page), fetches both `manage-withdrawal-request` + `get-f0-dashboard-stats` for lock system data
   - `src/types/f1Customer.ts`: Added `CommissionStatus` type and lock system fields
 - **Database VIEWs Updated**:
@@ -453,69 +453,50 @@ F0 receives payment (bank transfer / cash)
 
 ---
 
-## 12. ReferralHistoryPage Lock & Payment Display (v5)
+## 12. Commission Status Labels (v7 - Simplified)
 
 ### Overview
-Trang Lịch Sử Giới Thiệu hiển thị thêm 2 cột mới: "Trạng Thái Chốt" và "Thanh Toán" dựa trên dữ liệu từ `commission_records`.
+Đơn giản hóa cột "Trạng Thái Hoa Hồng" trong ReferralHistoryPage và MyCustomersPage để F0 dễ hiểu hơn.
 
-### UI Columns
-| Column | Data Source | Display Logic |
-|--------|-------------|---------------|
-| Trạng Thái Chốt | `commissionInfo.lockedAt` | Đã chốt (blue badge) / Chờ chốt (yellow badge + countdown) / Chưa đủ ĐK |
-| Thanh Toán | `commissionInfo.paidAt` | Đã TT (green badge) / Chưa TT (yellow badge) / -- |
+### Label Mapping (Database VIEW + UI)
 
-### Data Flow
-```
-get-f0-referral-history Edge Function (v5)
-         ↓
-Queries api.voucher_affiliate_tracking
-         ↓
-LEFT JOIN api.commission_records ON voucher_code
-         ↓
-Returns commissionInfo: {
-  lockedAt: string | null,   // Từ commission_records.locked_at
-  paidAt: string | null,     // Từ commission_records.paid_at
-  qualifiedAt, lockDate, daysUntilLock...
-}
-         ↓
-ReferralHistoryPage.tsx displays badges based on values
-```
+| Database Status | status_label (View) | UI Badge | Icon | Color |
+|-----------------|---------------------|----------|------|-------|
+| `pending` | Chờ xác nhận | 🟡 Warning | Clock | Vàng |
+| `available` | Chờ xác nhận | 🟡 Warning | Clock | Vàng |
+| `locked` | Chờ thanh toán | 🔵 Info | Lock | Xanh dương |
+| `paid` | Đã thanh toán | 🟢 Success | CheckCircle | Xanh lá |
+| `cancelled` | Đã hủy | 🔴 Danger | X | Đỏ |
 
-### Badge Display Logic
+### Changes from v5 → v7
+- "Đã xác thực" → "Chờ thanh toán" (lockedAt cases)
+- "Chờ xác thực" → "Chờ xác nhận" (pending cases)
+- "Còn X ngày" moved to "Điều Kiện" column (not "TT Hoa Hồng")
+- "Đã hủy" only shows for `INVOICE_CANCELLED` or `cancelled` status (not all invalid cases)
+
+### UI Logic - Column "Trạng Thái Hoa Hồng"
 ```typescript
-// Trạng Thái Chốt column
-if (referral.commissionInfo?.lockedAt) {
-  <Badge variant="info"><Lock /> Đã chốt</Badge>
-} else if (referral.commissionInfo?.lockDate) {
-  <Badge variant="warning"><Clock /> Chờ chốt</Badge>
-  // + "Còn X ngày" countdown
-} else if (hasInvoice && !invalid) {
-  <span>Chưa đủ ĐK</span>
-}
-
-// Thanh Toán column
-if (referral.commissionInfo?.paidAt) {
-  <Badge variant="success"><CreditCard /> Đã TT</Badge>
-} else if (referral.commissionInfo?.lockedAt) {
-  <Badge variant="warning"><Clock /> Chưa TT</Badge>
-}
+// ReferralHistoryPage.tsx - v7 simplified
+if (paidAt)                              → "Đã thanh toán" 🟢
+else if (cancelled || INVOICE_CANCELLED) → "Đã hủy" 🔴
+else if (lockedAt)                       → "Chờ thanh toán" 🔵
+else if (invoiceInfo)                    → "Chờ xác nhận" 🟡
+else                                     → "--"
 ```
 
-### Interface Updates
+### UI Logic - Column "Điều Kiện" (with "X ngày")
 ```typescript
-interface CommissionInfo {
-  totalCommission: number;
-  status: string;
-  breakdown: CommissionBreakdown;
-  // v5: Lock/payment status fields
-  qualifiedAt: string | null;
-  lockDate: string | null;
-  lockedAt: string | null;      // NEW: Timestamp when commission was locked
-  paidAt: string | null;        // NEW: Timestamp when commission was paid
-  daysUntilLock: number | null;
-  invoiceCancelledAt: string | null;
-}
+// ReferralHistoryPage.tsx - v7
+if (invalid)                → "KH cũ dùng" / "HĐ đã hủy" / "Không hợp lệ" ❌
+else if (paid || lockedAt)  → "Đủ điều kiện" ✅
+else if (invoiceInfo)       → "Chờ xử lý (X ngày)" ⏳  // Days countdown here!
+else                        → "Chưa mua" --
 ```
+
+### Files Updated
+- **Database VIEW**: `api.f1_customer_orders` - status_label CASE updated
+- **ReferralHistoryPage.tsx**: Column "TT Hoa Hồng" (v7) + Column "Điều Kiện" (v7)
+- **MyCustomersPage.tsx**: `getStatusBadge()`, Revenue/Commission Breakdown labels
 
 ---
 

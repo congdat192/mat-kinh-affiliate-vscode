@@ -7,8 +7,17 @@ export interface F1CustomerSummary {
   f1_customer_id: string;
   assigned_at: string;
   first_voucher_code: string;
+  // v17: Orders breakdown by status
+  pending_orders: number;
+  locked_orders: number;
+  paid_orders: number;
   total_orders: number;
+  // v17: Revenue breakdown by status
+  pending_revenue: number;
+  locked_revenue: number;
+  paid_revenue: number;
   total_revenue: number;
+  // Commission fields
   total_commission: number;
   paid_commission: number;
   pending_commission: number;
@@ -59,7 +68,15 @@ export interface F1CustomerListResponse {
   data?: {
     summary: {
       total_f1: number;
+      // v17: Orders breakdown by status
+      pending_orders: number;
+      locked_orders: number;
+      paid_orders: number;
       total_orders: number;
+      // v17: Revenue breakdown by status
+      pending_revenue: number;
+      locked_revenue: number;
+      paid_revenue: number;
       total_revenue: number;
       total_commission: number;
     };

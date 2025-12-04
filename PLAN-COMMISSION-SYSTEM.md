@@ -72,7 +72,7 @@ Status: paid
 | Status | Ý nghĩa | EXP | HH hiển thị | Bị ảnh hưởng bởi hủy đơn |
 |--------|---------|-----|-------------|--------------------------|
 | `pending` | Đang chờ chốt (trong X ngày) | ❌ Chưa | ✅ Có (dự kiến) | ✅ Có - bị hủy nếu đơn hủy |
-| `locked` | Đã chốt, chờ thanh toán | ✅ Đã cộng | ✅ Có (chính thức) | ❌ Không - HH + EXP giữ nguyên |
+| `locked` | Đã xác thực, chờ thanh toán | ✅ Đã cộng | ✅ Có (chính thức) | ❌ Không - HH + EXP giữ nguyên |
 | `paid` | Đã thanh toán | ✅ Đã cộng | ✅ Có (đã nhận) | ❌ Không |
 | `cancelled` | Bị hủy (đơn hủy trước khi chốt) | ❌ Không | ❌ Không | - |
 
@@ -193,8 +193,8 @@ SELECT
 
   -- Status label tiếng Việt
   CASE cr.status
-    WHEN 'pending' THEN 'Chờ chốt'
-    WHEN 'locked' THEN 'Đã chốt'
+    WHEN 'pending' THEN 'Chờ xác thực'
+    WHEN 'locked' THEN 'Đã xác thực'
     WHEN 'paid' THEN 'Đã thanh toán'
     WHEN 'cancelled' THEN 'Đã hủy'
     ELSE cr.status
@@ -554,8 +554,8 @@ await supabase
 ┌─────────────────────────────────────────┐
 │ Hoa hồng tháng 12/2025                  │
 ├─────────────────────────────────────────┤
-│ Chờ chốt:        500,000đ (2 đơn)       │
-│ Đã chốt:       1,200,000đ (5 đơn)       │
+│ Chờ xác thực:        500,000đ (2 đơn)       │
+│ Đã xác thực:       1,200,000đ (5 đơn)       │
 │ ─────────────────────────────────────── │
 │ Tổng tháng này: 1,700,000đ              │
 ├─────────────────────────────────────────┤
@@ -574,7 +574,7 @@ await supabase
 ### 5.2 Cập nhật: `MyCustomersPage.tsx` - Chi tiết đơn hàng
 
 **Thêm hiển thị:**
-- Badge status: "Chờ chốt (còn 5 ngày)" | "Đã chốt" | "Đã thanh toán"
+- Badge status: "Chờ xác thực (còn 5 ngày)" | "Đã xác thực" | "Đã thanh toán"
 - Tooltip giải thích status
 
 ### 5.3 Cập nhật: `get-f0-dashboard-stats`
@@ -587,9 +587,9 @@ await supabase
   commission: {
     // Tháng hiện tại
     current_month: '2025-12',
-    pending_amount: 500000,      // Chờ chốt
+    pending_amount: 500000,      // Chờ xác thực
     pending_count: 2,
-    locked_amount: 1200000,      // Đã chốt
+    locked_amount: 1200000,      // Đã xác thực
     locked_count: 5,
     total_current_month: 1700000,
 
@@ -744,8 +744,8 @@ SELECT cron.schedule(
 ### Commission Logic
 - Revenue counted only when `total = totalpayment` (fully paid)
 - Commission status: pending → locked → paid (CHANGED from available → paid)
-- pending: Chờ chốt (X ngày) - chưa tính EXP
-- locked: Đã chốt - tính EXP, không bị ảnh hưởng bởi hủy đơn
+- pending: Chờ xác thực (X ngày) - chưa tính EXP
+- locked: Đã xác thực - tính EXP, không bị ảnh hưởng bởi hủy đơn
 - Tier calculation based on LOCKED + PAID invoices only
 ```
 

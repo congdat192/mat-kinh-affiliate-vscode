@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-console.info('get-f1-customer-detail v2 - Get F1 customer detail with order history (v16 lock system)');
+console.info('get-f1-customer-detail v3 - Get F1 customer detail with order history (v17 revenue/orders breakdown)');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
       console.error('[CustomerDetail] Error fetching orders:', ordersError.message);
     }
 
-    // Format customer data - v2: Added lock system fields
+    // Format customer data - v3: Added revenue/orders breakdown by status
     const formattedCustomer = {
       assignment_id: customer.assignment_id,
       f1_phone: customer.f1_phone,
@@ -76,8 +76,17 @@ Deno.serve(async (req) => {
       first_voucher_code: customer.first_voucher_code,
       first_invoice_code: customer.first_invoice_code,
       first_invoice_date: customer.first_invoice_date,
+      // v17: Orders breakdown by status
+      pending_orders: customer.pending_orders || 0,
+      locked_orders: customer.locked_orders || 0,
+      paid_orders: customer.paid_orders || 0,
       total_orders: customer.total_orders || 0,
+      // v17: Revenue breakdown by status
+      pending_revenue: Number(customer.pending_revenue || 0),
+      locked_revenue: Number(customer.locked_revenue || 0),
+      paid_revenue: Number(customer.paid_revenue || 0),
       total_revenue: Number(customer.total_revenue || 0),
+      // Commission fields
       total_commission: Number(customer.total_commission || 0),
       paid_commission: Number(customer.paid_commission || 0),
       pending_commission: Number(customer.pending_commission || 0),

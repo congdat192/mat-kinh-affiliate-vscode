@@ -343,7 +343,7 @@ const getStatusBadge = (status: string, label: string, daysUntilLock?: number) =
 ### 6.2 Commission Breakdown Cards (Reuse)
 ```
 ┌─────────────┬─────────────┬─────────────┬─────────────┐
-│  Chờ chốt   │  Đã chốt    │  Đã nhận    │   Tổng      │
+│  Chờ xác thực   │  Đã xác thực    │  Đã nhận    │   Tổng      │
 │  (orange)   │  (purple)   │  (green)    │  (gray)     │
 │  pending    │  locked     │  paid       │  total      │
 └─────────────┴─────────────┴─────────────┴─────────────┘
