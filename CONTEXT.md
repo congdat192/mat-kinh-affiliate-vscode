@@ -625,3 +625,104 @@ Khi F0 bị xóa nhưng session chưa expired:
 - Supabase queries sẽ return empty/null
 - Auth context sẽ detect invalid session
 - User redirected to login page
+
+---
+
+## 15. Commission Lock Status Sync Fix (2025-12-04)
+
+### Related Plan
+- `PLAN-FIX-LOCK-STATUS-SYNC.md` (ERP-FE-fresh project)
+
+### Problem
+1. **Dashboard Stats sai**: "Chờ chốt" và "Đã chốt" hiển thị sai số liệu
+2. **MyCustomersPage** không hiển thị giống `ReferralHistoryPage` (thiếu badges, countdown)
+3. **WithdrawalPage** cũng sai vì dùng chung data source
+
+### Root Cause
+- Cron job `lock-pending-commissions` chạy 1 lần/ngày (17:05 UTC)
+- Commission có `lock_date` đã qua nhưng `status` vẫn `pending` do cron chưa chạy
+- FE chỉ check `status` field, không check `lock_date`
+
+### Solution: "Effectively Locked" Concept
+
+**Logic**: Commission được coi là "locked" nếu:
+- `status = 'locked'` hoặc `status = 'paid'` (DB đã cập nhật)
+- HOẶC `status = 'pending'` VÀ `lock_date <= now()` (DB chưa cập nhật nhưng đã qua thời gian chốt)
+
+### Edge Function Updated
+**`get-f0-dashboard-stats` v26**:
+```typescript
+// Check if commission is effectively locked
+const isEffectivelyLocked = (c: any): boolean => {
+  if (c.status === 'locked' || c.status === 'paid') return true;
+  if (c.status === 'pending' && c.lock_date) {
+    const lockDate = new Date(c.lock_date);
+    return lockDate <= now;
+  }
+  return false;
+};
+
+// Use in stats calculation
+const validCommissions = commissions.filter(c => isEffectivelyLocked(c));
+const lockedCommissions = commissions.filter(c => {
+  if (c.status === 'locked') return true;
+  if (c.status === 'pending' && c.lock_date) {
+    return new Date(c.lock_date) <= now;
+  }
+  return false;
+});
+```
+
+### Frontend Updated
+**`MyCustomersPage.tsx` v9** - Helper functions:
+
+```typescript
+// Calculate time until lock text (like ReferralHistoryPage)
+const getTimeUntilLockText = (lockDate: string | null): string | null => {
+  if (!lockDate) return null;
+  const now = new Date();
+  const lock = new Date(lockDate);
+  const diffMs = lock.getTime() - now.getTime();
+  if (diffMs <= 0) return 'Đã đủ điều kiện';
+
+  const diffMinutes = Math.ceil(diffMs / (1000 * 60));
+  if (diffMinutes < 60) return `${diffMinutes} phút`;
+  if (diffMinutes < 1440) return `${Math.ceil(diffMinutes / 60)} giờ`;
+  return `${Math.ceil(diffMs / (1000 * 60 * 60 * 24))} ngày`;
+};
+
+// Check if commission is effectively locked
+const isEffectivelyLocked = (order: F1CustomerOrder): boolean => {
+  if (order.commission_status === 'locked' || order.commission_status === 'paid') return true;
+  if (order.commission_status === 'pending' && order.lock_date) {
+    return new Date(order.lock_date) <= new Date();
+  }
+  return false;
+};
+```
+
+**Badges display** (matching ReferralHistoryPage):
+| Condition | Badge |
+|-----------|-------|
+| `paid_at` exists | ✅ Đã thanh toán (green) |
+| `cancelled` or `invoice_cancelled_at` | ❌ Đã hủy (red) |
+| `locked_at` or `isEffectivelyLocked()` | 🔒 Chờ thanh toán (blue) |
+| `pending` with `lock_date` | ⏳ Chờ xử lý (X phút/giờ/ngày) (yellow) |
+
+### Cron Job Updated
+```sql
+-- Changed from daily to every 30 minutes
+schedule: '*/30 * * * *'
+```
+
+### Files Changed
+| File | Version | Changes |
+|------|---------|---------|
+| `get-f0-dashboard-stats` | v26 | Added `isEffectivelyLocked()` logic |
+| `MyCustomersPage.tsx` | v9 | Added helper functions, badges like ReferralHistoryPage |
+| `cron.job` | - | Schedule: `5 17 * * *` → `*/30 * * * *` |
+
+### Impact
+- **Dashboard**: Stats now correct immediately after lock_date passes
+- **WithdrawalPage**: Auto-fixed (uses same `get-f0-dashboard-stats`)
+- **MyCustomersPage**: UI now matches ReferralHistoryPage exactly

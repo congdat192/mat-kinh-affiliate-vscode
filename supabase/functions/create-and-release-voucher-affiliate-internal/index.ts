@@ -325,7 +325,8 @@ Deno.serve(async (req)=>{
 
     // 6. Check for duplicate voucher in affiliate.voucher_affiliate_tracking
     console.log('[Duplicate] Checking existing voucher...');
-    const { data: existingVouchers, error: duplicateError } = await supabase.from('voucher_affiliate_tracking').select('code, expired_at, activation_status').eq('campaign_id', campaign.campaign_id).eq('recipient_phone', cleanPhone).order('created_at', {
+    // v2: Added voucher_used to SELECT - fix bug checking wrong field
+    const { data: existingVouchers, error: duplicateError } = await supabase.from('voucher_affiliate_tracking').select('code, expired_at, activation_status, voucher_used').eq('campaign_id', campaign.campaign_id).eq('recipient_phone', cleanPhone).order('created_at', {
       ascending: false
     });
 
@@ -343,7 +344,11 @@ Deno.serve(async (req)=>{
       const now = new Date();
       const expiredDate = new Date(latest.expired_at);
       const isExpired = expiredDate < now;
-      const isUsed = latest.activation_status === 'Đã sử dụng';
+      // v2: Fix bug - check voucher_used instead of activation_status
+      // activation_status = 'Đã kích hoạt' doesn't change when voucher is used
+      // voucher_used = true is the correct field to check
+      const isUsed = latest.voucher_used === true;
+      console.log('[Duplicate] Check:', { code: latest.code, voucher_used: latest.voucher_used, isExpired, isUsed });
       if (!isExpired && !isUsed) {
         const daysRemaining = Math.ceil((expiredDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
         console.log('[Duplicate] Active voucher exists');

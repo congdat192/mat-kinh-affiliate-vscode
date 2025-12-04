@@ -92,9 +92,11 @@ interface WithdrawalData {
   minWithdrawalAmount: number;
 }
 
-// v16: Lock payment settings from database
+// v18: Lock payment settings from database (hours + minutes)
 interface LockSettings {
-  lockPeriodDays: number;
+  lockPeriodDays: number;  // Kept for backward compatibility
+  lockPeriodHours: number;
+  lockPeriodMinutes: number;
   paymentDay: number;
 }
 
@@ -175,9 +177,11 @@ const WithdrawalPage = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<WithdrawalData | null>(null);
-  // v16: Lock settings from database (default values as fallback)
+  // v18: Lock settings from database (default values as fallback)
   const [lockSettings, setLockSettings] = useState<LockSettings>({
-    lockPeriodDays: 15,
+    lockPeriodDays: 1,
+    lockPeriodHours: 24,
+    lockPeriodMinutes: 0,
     paymentDay: 5,
   });
   // v16: Removed withdrawal form states - F0 no longer submits withdrawal requests
@@ -273,10 +277,12 @@ const WithdrawalPage = () => {
 
       setData(mergedData);
 
-      // v17: Update lock settings from dashboard response
+      // v18: Update lock settings from dashboard response (hours + minutes)
       if (dashboardResult.success && dashboardResult.data.lockSettings) {
         setLockSettings({
-          lockPeriodDays: dashboardResult.data.lockSettings.lockPeriodDays || 15,
+          lockPeriodDays: dashboardResult.data.lockSettings.lockPeriodDays || 1,
+          lockPeriodHours: dashboardResult.data.lockSettings.lockPeriodHours ?? 24,
+          lockPeriodMinutes: dashboardResult.data.lockSettings.lockPeriodMinutes ?? 0,
           paymentDay: dashboardResult.data.lockSettings.paymentDay || 5,
         });
       }
@@ -388,6 +394,20 @@ const WithdrawalPage = () => {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  // v18: Format lock period as hours + minutes
+  const formatLockPeriod = () => {
+    const hours = lockSettings.lockPeriodHours;
+    const minutes = lockSettings.lockPeriodMinutes;
+    if (hours === 0 && minutes > 0) {
+      return `${minutes} phút`;
+    } else if (hours > 0 && minutes === 0) {
+      return `${hours} giờ`;
+    } else if (hours > 0 && minutes > 0) {
+      return `${hours} giờ ${minutes} phút`;
+    }
+    return '24 giờ';
   };
 
   // Get status badge variant
@@ -661,7 +681,7 @@ const WithdrawalPage = () => {
                 Hoa hồng đang chờ chốt
               </CardTitle>
               <CardDescription>
-                Các hoa hồng này đang trong thời gian chờ xác nhận ({lockSettings.lockPeriodDays} ngày)
+                Các hoa hồng này đang trong thời gian chờ xác nhận ({formatLockPeriod()})
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -934,7 +954,7 @@ const WithdrawalPage = () => {
                   Tình Trạng Hoa Hồng
                 </CardTitle>
                 <CardDescription>
-                  Hoa hồng được chốt sau {lockSettings.lockPeriodDays} ngày và thanh toán tự động vào ngày {lockSettings.paymentDay} hàng tháng
+                  Hoa hồng được chốt sau {formatLockPeriod()} và thanh toán tự động vào ngày {lockSettings.paymentDay} hàng tháng
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -950,7 +970,7 @@ const WithdrawalPage = () => {
                       {formatCurrency(balance.pendingCommission || 0)}
                     </p>
                     <p className="text-xs text-orange-600 mt-1">
-                      Đang trong thời gian chờ xác nhận ({lockSettings.lockPeriodDays} ngày)
+                      Đang trong thời gian chờ xác nhận ({formatLockPeriod()})
                     </p>
                   </div>
 
@@ -992,11 +1012,11 @@ const WithdrawalPage = () => {
                       <ul className="mt-2 space-y-2 text-sm text-blue-800">
                         <li className="flex items-center gap-2">
                           <span className="w-5 h-5 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-semibold">1</span>
-                          <span><strong>Chờ chốt:</strong> Hoa hồng từ đơn hàng mới sẽ được chờ xác nhận trong {lockSettings.lockPeriodDays} ngày</span>
+                          <span><strong>Chờ chốt:</strong> Hoa hồng từ đơn hàng mới sẽ được chờ xác nhận trong {formatLockPeriod()}</span>
                         </li>
                         <li className="flex items-center gap-2">
                           <span className="w-5 h-5 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-xs font-semibold">2</span>
-                          <span><strong>Đã chốt:</strong> Sau {lockSettings.lockPeriodDays} ngày, hoa hồng được chốt và EXP được cộng vào tài khoản</span>
+                          <span><strong>Đã chốt:</strong> Sau {formatLockPeriod()}, hoa hồng được chốt và EXP được cộng vào tài khoản</span>
                         </li>
                         <li className="flex items-center gap-2">
                           <span className="w-5 h-5 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-semibold">3</span>

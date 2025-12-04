@@ -59,12 +59,14 @@ interface CommissionInfo {
   totalCommission: number;
   status: string;
   breakdown: CommissionBreakdown;
-  // v5: Lock/payment status fields
+  // v6: Lock/payment status fields + timeUntilLockText
   qualifiedAt: string | null;
   lockDate: string | null;
   lockedAt: string | null;
   paidAt: string | null;
   daysUntilLock: number | null;
+  minutesUntilLock: number | null;
+  timeUntilLockText: string | null;
   invoiceCancelledAt: string | null;
 }
 
@@ -681,7 +683,8 @@ const ReferralHistoryPage = () => {
                                    'Không hợp lệ'}
                                 </span>
                               </div>
-                            ) : referral.commissionStatus === 'paid' || referral.commissionInfo?.lockedAt ? (
+                            ) : referral.commissionStatus === 'paid' || referral.commissionInfo?.lockedAt ||
+                               (referral.commissionInfo?.lockDate && new Date(referral.commissionInfo.lockDate) <= new Date()) ? (
                               <div className="flex items-center gap-1">
                                 <CheckCircle className="w-4 h-4 text-green-500" />
                                 <span className="text-xs text-green-600">Đủ điều kiện</span>
@@ -691,9 +694,8 @@ const ReferralHistoryPage = () => {
                                 <Clock className="w-4 h-4 text-yellow-500" />
                                 <span className="text-xs text-yellow-600">
                                   Chờ xử lý
-                                  {referral.commissionInfo?.daysUntilLock != null &&
-                                   referral.commissionInfo.daysUntilLock >= 0 && (
-                                    <span className="ml-1">({referral.commissionInfo.daysUntilLock} ngày)</span>
+                                  {referral.commissionInfo?.timeUntilLockText && (
+                                    <span className="ml-1">({referral.commissionInfo.timeUntilLockText})</span>
                                   )}
                                 </span>
                               </div>

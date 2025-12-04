@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-console.info('Webhook affiliate check voucher invoice started - v10 (Lock period system: pending → locked → paid)');
+console.info('Webhook affiliate check voucher invoice started - v12 (Check totalrevenue BEFORE current invoice)');
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -552,31 +552,56 @@ async function calculateFirstOrderCommission(supabase: any, invoiceAmount: numbe
     return result;
   }
   // VALIDATION 3: Check if actual user is NEW customer
+  // v12: Check totalrevenue BEFORE this invoice was created
+  // When webhook fires, KiotViet has already updated totalrevenue to include this invoice
+  // So we need to check: totalrevenue - invoiceAmount <= 0 (was new BEFORE this invoice)
+  // Phone matching is NOT required - voucher can be used by different phone
   const normalizedActualPhone = normalizePhone(actualUserPhone);
   const normalizedRecipientPhone = normalizePhone(affiliateVoucher.recipient_phone);
-  console.log(`[Commission] Checking customer type...`);
-  console.log(`[Commission]   Recipient phone: ${normalizedRecipientPhone}`);
-  console.log(`[Commission]   Actual user phone: ${normalizedActualPhone}`);
-  const { data: existingCustomer, error: customerError } = await supabase.from('customers_backup').select('code, contactnumber, name').eq('contactnumber', normalizedActualPhone).maybeSingle();
+  console.log(`[Commission] Checking if INVOICE CUSTOMER was NEW before this invoice...`);
+  console.log(`[Commission]   Recipient phone (voucher): ${normalizedRecipientPhone}`);
+  console.log(`[Commission]   Actual user phone (invoice): ${normalizedActualPhone}`);
+  console.log(`[Commission]   Current invoice amount: ${invoiceAmount.toLocaleString()}đ`);
+  console.log(`[Commission]   Phone match NOT required in v12`);
+
+  // Query customer from customers_backup WITH totalrevenue
+  const { data: invoiceCustomer, error: customerError } = await supabase
+    .from('customers_backup')
+    .select('code, contactnumber, name, totalrevenue')
+    .eq('contactnumber', normalizedActualPhone)
+    .maybeSingle();
+
   if (customerError) {
     console.error('[Commission] Error checking customer:', customerError.message);
   }
+
   let actualCustomerType;
-  if (normalizedActualPhone === normalizedRecipientPhone) {
-    actualCustomerType = affiliateVoucher.customer_type;
-    console.log(`[Commission] ✅ Phone MATCHED - Using voucher customer_type: ${actualCustomerType}`);
+  if (!invoiceCustomer) {
+    // Customer not found in KiotViet → considered NEW
+    actualCustomerType = 'new';
+    console.log(`[Commission] ✅ Customer NOT in KiotViet → NEW customer`);
   } else {
-    if (existingCustomer) {
-      actualCustomerType = 'old';
-      console.log(`[Commission] ⚠️ Phone MISMATCH - Actual user is EXISTING customer: ${existingCustomer.name}`);
-    } else {
+    // Customer found - check totalrevenue BEFORE this invoice
+    const currentTotalRevenue = Number(invoiceCustomer.totalrevenue) || 0;
+    const revenueBeforeThisInvoice = currentTotalRevenue - invoiceAmount;
+
+    console.log(`[Commission]   Customer found: ${invoiceCustomer.name}`);
+    console.log(`[Commission]   Current totalrevenue: ${currentTotalRevenue.toLocaleString()}đ`);
+    console.log(`[Commission]   Revenue BEFORE this invoice: ${revenueBeforeThisInvoice.toLocaleString()}đ`);
+
+    // NEW customer = totalrevenue BEFORE this invoice was 0 or negative (first purchase)
+    if (revenueBeforeThisInvoice <= 0) {
       actualCustomerType = 'new';
-      console.log(`[Commission] ⚠️ Phone MISMATCH - Actual user is NEW customer`);
+      console.log(`[Commission] ✅ Revenue before invoice = ${revenueBeforeThisInvoice} <= 0 → WAS NEW customer (first purchase)`);
+    } else {
+      actualCustomerType = 'old';
+      console.log(`[Commission] ⚠️ Revenue before invoice = ${revenueBeforeThisInvoice} > 0 → WAS OLD customer (repeat purchase)`);
     }
   }
+
   if (actualCustomerType === 'old') {
     result.invalidReasonCode = 'CUSTOMER_NOT_NEW';
-    result.invalidReasonText = `Khách hàng sử dụng voucher không phải khách mới. SĐT: ${actualUserPhone}`;
+    result.invalidReasonText = `Khách hàng đã có doanh thu trước đó (không phải đơn đầu tiên). SĐT: ${actualUserPhone}`;
     console.log(`[Commission] ❌ Validation failed: ${result.invalidReasonText}`);
     return result;
   }

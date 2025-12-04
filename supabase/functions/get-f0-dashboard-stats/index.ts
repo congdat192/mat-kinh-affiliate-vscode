@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS'
 };
 
-console.info('get-f0-dashboard-stats v17 - Added lock_payment_settings for dynamic lock period display');
+console.info('get-f0-dashboard-stats v25 - Fixed lockSettings query to return correct hours/minutes from database');
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -90,9 +90,9 @@ Deno.serve(async (req) => {
         .select('*')
         .eq('f0_id', f0_id),
 
-      // 8. v17: Get lock payment settings
+      // 8. v18: Get lock payment settings (hours + minutes instead of days)
       supabase.from('lock_payment_settings')
-        .select('lock_period_days, payment_day')
+        .select('lock_period_days, lock_period_hours, lock_period_minutes, payment_day')
         .eq('is_active', true)
         .single()
     ]);
@@ -117,10 +117,23 @@ Deno.serve(async (req) => {
     const tiers = tiersResult.data || [];
     const adjustments = adjustmentsResult.data || [];
 
-    // v17: Extract lock settings with fallback defaults
-    const lockSettings = lockSettingsResult.data || { lock_period_days: 15, payment_day: 5 };
-    console.log(`=== LOCK SETTINGS (v17) ===`);
-    console.log(`Lock period: ${lockSettings.lock_period_days} days, Payment day: ${lockSettings.payment_day}`);
+    // v25: Extract lock settings with proper debug logging
+    console.log(`=== LOCK SETTINGS QUERY RESULT (v25) ===`);
+    console.log(`lockSettingsResult.data:`, JSON.stringify(lockSettingsResult.data));
+    console.log(`lockSettingsResult.error:`, JSON.stringify(lockSettingsResult.error));
+
+    const rawLockSettings = lockSettingsResult.data;
+
+    // Use nullish coalescing (??) to properly handle 0 values
+    const lockSettings = {
+      lock_period_days: rawLockSettings?.lock_period_days ?? 0,
+      lock_period_hours: rawLockSettings?.lock_period_hours ?? 24,
+      lock_period_minutes: rawLockSettings?.lock_period_minutes ?? 0,
+      payment_day: rawLockSettings?.payment_day ?? 5
+    };
+
+    console.log(`=== PARSED LOCK SETTINGS (v25) ===`);
+    console.log(`Hours: ${lockSettings.lock_period_hours}, Minutes: ${lockSettings.lock_period_minutes}, Payment day: ${lockSettings.payment_day}`);
 
     if (tiers.length === 0) {
       console.log('WARNING: Tiers query returned empty! Error:', tiersResult.error);
@@ -394,9 +407,11 @@ Deno.serve(async (req) => {
       },
       recentActivity,
       unreadNotifications: notificationsResult.count || 0,
-      // v17: Lock payment settings for dynamic display
+      // v18: Lock payment settings for dynamic display (hours + minutes)
       lockSettings: {
-        lockPeriodDays: lockSettings.lock_period_days,
+        lockPeriodDays: lockSettings.lock_period_days,  // Kept for backward compatibility
+        lockPeriodHours: lockSettings.lock_period_hours,
+        lockPeriodMinutes: lockSettings.lock_period_minutes,
         paymentDay: lockSettings.payment_day
       }
     };

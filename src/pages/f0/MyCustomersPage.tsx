@@ -87,47 +87,110 @@ const getAvatarColor = (name: string) => {
   return colors[index];
 };
 
-// Get commission status badge - v7: Simplified labels per PLAN
-// Values: "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán", "Đã hủy"
-const getStatusBadge = (status: string, label: string, daysUntilLock?: number | null) => {
-  switch (status) {
-    case 'paid':
-      return (
-        <Badge variant="success" className="text-xs">
-          <CheckCircle2 className="w-3 h-3 mr-1" />
-          Đã thanh toán
-        </Badge>
-      );
-    case 'locked':
-      return (
-        <Badge variant="default" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
-          <Lock className="w-3 h-3 mr-1" />
-          Chờ thanh toán
-        </Badge>
-      );
-    case 'pending':
-    case 'available': // Legacy support
-      return (
-        <Badge variant="warning" className="text-xs">
-          <Clock className="w-3 h-3 mr-1" />
-          Chờ xác nhận{daysUntilLock !== null && daysUntilLock !== undefined && daysUntilLock > 0 ? ` (${daysUntilLock} ngày)` : ''}
-        </Badge>
-      );
-    case 'cancelled':
-      return (
-        <Badge variant="danger" className="text-xs">
-          <XCircle className="w-3 h-3 mr-1" />
-          Đã hủy
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="default" className="text-xs text-gray-500">
-          <Clock className="w-3 h-3 mr-1" />
-          Chờ xác nhận
-        </Badge>
-      );
+// v9: Helper to calculate time until lock text (like ReferralHistoryPage)
+const getTimeUntilLockText = (lockDate: string | null): string | null => {
+  if (!lockDate) return null;
+  const now = new Date();
+  const lock = new Date(lockDate);
+  const diffMs = lock.getTime() - now.getTime();
+  if (diffMs <= 0) return 'Đã đủ điều kiện';
+
+  const diffMinutes = Math.ceil(diffMs / (1000 * 60));
+  if (diffMinutes < 60) return `${diffMinutes} phút`;
+  if (diffMinutes < 1440) return `${Math.ceil(diffMinutes / 60)} giờ`;
+  return `${Math.ceil(diffMs / (1000 * 60 * 60 * 24))} ngày`;
+};
+
+// v9: Check if commission is effectively locked (status=locked OR lock_date passed)
+const isEffectivelyLocked = (order: F1CustomerOrder): boolean => {
+  if (order.commission_status === 'locked' || order.commission_status === 'paid') return true;
+  if (order.commission_status === 'pending' && order.lock_date) {
+    return new Date(order.lock_date) <= new Date();
   }
+  return false;
+};
+
+// Get commission status badge - v9: Updated to match ReferralHistoryPage exactly
+// Values: "Chờ xác nhận", "Chờ thanh toán", "Đã thanh toán", "Đã hủy"
+const getStatusBadge = (order: F1CustomerOrder) => {
+  const status = order.commission_status;
+
+  // Paid
+  if (order.paid_at || status === 'paid') {
+    return (
+      <Badge variant="success" className="text-xs flex items-center gap-1 w-fit">
+        <CheckCircle2 className="w-3 h-3" />
+        Đã thanh toán
+      </Badge>
+    );
+  }
+
+  // Cancelled
+  if (status === 'cancelled' || order.invoice_cancelled_at) {
+    return (
+      <Badge variant="danger" className="text-xs flex items-center gap-1 w-fit">
+        <XCircle className="w-3 h-3" />
+        Đã hủy
+      </Badge>
+    );
+  }
+
+  // Locked (or effectively locked via lock_date)
+  if (order.locked_at || isEffectivelyLocked(order)) {
+    return (
+      <Badge variant="default" className="text-xs bg-blue-100 text-blue-700 border-blue-200 flex items-center gap-1 w-fit">
+        <Lock className="w-3 h-3" />
+        Chờ thanh toán
+      </Badge>
+    );
+  }
+
+  // Pending
+  return (
+    <Badge variant="warning" className="text-xs flex items-center gap-1 w-fit">
+      <Clock className="w-3 h-3" />
+      Chờ xác nhận
+    </Badge>
+  );
+};
+
+// v9: Get condition status (Điều Kiện column like ReferralHistoryPage)
+const getConditionBadge = (order: F1CustomerOrder) => {
+  // Cancelled
+  if (order.commission_status === 'cancelled' || order.invoice_cancelled_at) {
+    return (
+      <div className="flex items-center gap-1">
+        <XCircle className="w-4 h-4 text-red-500" />
+        <span className="text-xs text-red-600">HĐ đã hủy</span>
+      </div>
+    );
+  }
+
+  // Paid or locked or effectively locked
+  if (order.paid_at || order.locked_at || isEffectivelyLocked(order)) {
+    return (
+      <div className="flex items-center gap-1">
+        <CheckCircle2 className="w-4 h-4 text-green-500" />
+        <span className="text-xs text-green-600">Đủ điều kiện</span>
+      </div>
+    );
+  }
+
+  // Pending with lock_date
+  if (order.lock_date) {
+    const timeText = getTimeUntilLockText(order.lock_date);
+    return (
+      <div className="flex items-center gap-1">
+        <Clock className="w-4 h-4 text-yellow-500" />
+        <span className="text-xs text-yellow-600">
+          Chờ xử lý {timeText && `(${timeText})`}
+        </span>
+      </div>
+    );
+  }
+
+  // No invoice yet
+  return <span className="text-gray-400 text-xs">--</span>;
 };
 
 // ============================================
@@ -137,23 +200,35 @@ interface OrderRowProps {
   order: F1CustomerOrder;
 }
 
+// v9: Updated OrderRow to match ReferralHistoryPage columns exactly
 const OrderRow = memo(({ order }: OrderRowProps) => (
   <div className="bg-white p-3 rounded-lg border text-sm">
-    <div className="flex items-center justify-between mb-2">
-      <span className="font-medium">{order.invoice_code}</span>
-      {getStatusBadge(order.commission_status, order.status_label, order.days_until_lock)}
+    {/* Row 1: Voucher Code + Order Info */}
+    <div className="flex items-start justify-between gap-2 mb-2">
+      <div>
+        <span className="font-mono text-xs text-gray-500">{order.voucher_code}</span>
+        {order.is_lifetime_commission && (
+          <Badge variant="info" className="text-xs ml-1">Mua lại</Badge>
+        )}
+      </div>
+      <div className="text-right">
+        <p className="font-medium text-green-600">{formatCurrencyFull(order.invoice_amount)}</p>
+        <p className="text-xs text-gray-500">{order.invoice_code}</p>
+      </div>
     </div>
-    <div className="flex items-center justify-between text-gray-500">
-      <span>{formatDateTime(order.invoice_date)}</span>
-      <span className="font-medium text-gray-900">
-        {formatCurrencyFull(order.invoice_amount)}
-      </span>
+
+    {/* Row 2: Condition + Commission */}
+    <div className="flex items-center justify-between gap-2 mb-2">
+      <div>{getConditionBadge(order)}</div>
+      <div className="text-right">
+        <span className="font-semibold text-primary-600">+{formatCurrencyFull(order.total_commission)}</span>
+      </div>
     </div>
-    <div className="flex items-center justify-between mt-1">
-      <span className="text-xs text-gray-400">{order.order_type}</span>
-      <span className="text-xs font-medium text-primary-600">
-        +{formatCurrencyFull(order.total_commission)}
-      </span>
+
+    {/* Row 3: Date + Commission Status */}
+    <div className="flex items-center justify-between gap-2 pt-2 border-t">
+      <span className="text-xs text-gray-400">{formatDateTime(order.invoice_date)}</span>
+      {getStatusBadge(order)}
     </div>
   </div>
 ));
@@ -281,47 +356,14 @@ const CustomerRow = memo(({
               </div>
             </div>
 
-            {/* v17: Revenue Breakdown - v7: Updated labels */}
-            <div className="mb-4">
-              <p className="text-gray-500 text-xs mb-2 flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
-                Doanh thu theo trạng thái
-              </p>
-              <div className="grid grid-cols-4 gap-3 text-sm">
-                <div className="bg-orange-50 p-2 rounded-lg border border-orange-100">
-                  <p className="text-orange-600 text-xs">Chờ xác nhận</p>
-                  <p className="font-semibold text-orange-600">{formatCurrencyFull(customer.pending_revenue || 0)}</p>
-                </div>
-                <div className="bg-blue-50 p-2 rounded-lg border border-blue-100">
-                  <p className="text-blue-600 text-xs">Chờ thanh toán</p>
-                  <p className="font-semibold text-blue-600">{formatCurrencyFull(customer.locked_revenue || 0)}</p>
-                </div>
-                <div className="bg-green-50 p-2 rounded-lg border border-green-100">
-                  <p className="text-green-600 text-xs">Đã thanh toán</p>
-                  <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_revenue || 0)}</p>
-                </div>
-                <div className="bg-gray-50 p-2 rounded-lg border">
-                  <p className="text-gray-500 text-xs">Tổng</p>
-                  <p className="font-semibold text-gray-900">{formatCurrencyFull(customer.total_revenue || 0)}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Commission Breakdown - v7: Updated labels per PLAN */}
-            <div className="grid grid-cols-4 gap-3 text-sm">
-              <div className="bg-orange-50 p-3 rounded-lg border border-orange-100">
-                <p className="text-orange-600 text-xs flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  Chờ xác nhận
+            {/* v8: Simplified Commission Summary - 3 cards only */}
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div className="bg-primary-50 p-3 rounded-lg border border-primary-100">
+                <p className="text-primary-600 text-xs flex items-center gap-1">
+                  <DollarSign className="w-3 h-3" />
+                  Tổng hoa hồng
                 </p>
-                <p className="font-semibold text-orange-600">{formatCurrencyFull(customer.pending_commission || 0)}</p>
-              </div>
-              <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                <p className="text-blue-600 text-xs flex items-center gap-1">
-                  <Lock className="w-3 h-3" />
-                  Chờ thanh toán
-                </p>
-                <p className="font-semibold text-blue-600">{formatCurrencyFull(customer.locked_commission || 0)}</p>
+                <p className="font-semibold text-primary-600">{formatCurrencyFull(customer.total_commission || 0)}</p>
               </div>
               <div className="bg-green-50 p-3 rounded-lg border border-green-100">
                 <p className="text-green-600 text-xs flex items-center gap-1">
@@ -330,12 +372,12 @@ const CustomerRow = memo(({
                 </p>
                 <p className="font-semibold text-green-600">{formatCurrencyFull(customer.paid_commission || 0)}</p>
               </div>
-              <div className="bg-gray-50 p-3 rounded-lg border">
-                <p className="text-gray-500 text-xs flex items-center gap-1">
-                  <DollarSign className="w-3 h-3" />
-                  Tổng
+              <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100">
+                <p className="text-yellow-600 text-xs flex items-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  Chờ xử lý
                 </p>
-                <p className="font-semibold text-gray-900">{formatCurrencyFull(customer.total_commission || 0)}</p>
+                <p className="font-semibold text-yellow-600">{formatCurrencyFull((customer.pending_commission || 0) + (customer.locked_commission || 0))}</p>
               </div>
             </div>
           </div>
