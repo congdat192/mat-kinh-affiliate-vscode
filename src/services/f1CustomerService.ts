@@ -51,13 +51,21 @@ class F1CustomerService {
       // Get summary stats (all customers, not just current page)
       const { data: allCustomers } = await supabase
         .from('f1_customers_summary')
-        .select('total_orders, total_revenue, total_commission')
+        .select('pending_orders, locked_orders, paid_orders, total_orders, pending_revenue, locked_revenue, paid_revenue, total_revenue, total_commission')
         .eq('f0_id', f0_id)
         .eq('is_active', true);
 
       const summary = {
         total_f1: count || 0,
+        // v17: Orders breakdown by status
+        pending_orders: allCustomers?.reduce((sum, c) => sum + (c.pending_orders || 0), 0) || 0,
+        locked_orders: allCustomers?.reduce((sum, c) => sum + (c.locked_orders || 0), 0) || 0,
+        paid_orders: allCustomers?.reduce((sum, c) => sum + (c.paid_orders || 0), 0) || 0,
         total_orders: allCustomers?.reduce((sum, c) => sum + (c.total_orders || 0), 0) || 0,
+        // v17: Revenue breakdown by status
+        pending_revenue: allCustomers?.reduce((sum, c) => sum + Number(c.pending_revenue || 0), 0) || 0,
+        locked_revenue: allCustomers?.reduce((sum, c) => sum + Number(c.locked_revenue || 0), 0) || 0,
+        paid_revenue: allCustomers?.reduce((sum, c) => sum + Number(c.paid_revenue || 0), 0) || 0,
         total_revenue: allCustomers?.reduce((sum, c) => sum + Number(c.total_revenue || 0), 0) || 0,
         total_commission: allCustomers?.reduce((sum, c) => sum + Number(c.total_commission || 0), 0) || 0,
       };
@@ -70,7 +78,15 @@ class F1CustomerService {
         f1_customer_id: c.f1_customer_id || '',
         assigned_at: c.assigned_at,
         first_voucher_code: c.first_voucher_code || '',
+        // v17: Orders breakdown by status
+        pending_orders: c.pending_orders || 0,
+        locked_orders: c.locked_orders || 0,
+        paid_orders: c.paid_orders || 0,
         total_orders: c.total_orders || 0,
+        // v17: Revenue breakdown by status
+        pending_revenue: Number(c.pending_revenue) || 0,
+        locked_revenue: Number(c.locked_revenue) || 0,
+        paid_revenue: Number(c.paid_revenue) || 0,
         total_revenue: Number(c.total_revenue) || 0,
         total_commission: Number(c.total_commission) || 0,
         paid_commission: Number(c.paid_commission) || 0,
@@ -183,7 +199,15 @@ class F1CustomerService {
             f1_customer_id: customerData.f1_customer_id || '',
             assigned_at: customerData.assigned_at,
             first_voucher_code: customerData.first_voucher_code || '',
+            // v17: Orders breakdown by status
+            pending_orders: customerData.pending_orders || 0,
+            locked_orders: customerData.locked_orders || 0,
+            paid_orders: customerData.paid_orders || 0,
             total_orders: customerData.total_orders || 0,
+            // v17: Revenue breakdown by status
+            pending_revenue: Number(customerData.pending_revenue) || 0,
+            locked_revenue: Number(customerData.locked_revenue) || 0,
+            paid_revenue: Number(customerData.paid_revenue) || 0,
             total_revenue: Number(customerData.total_revenue) || 0,
             total_commission: Number(customerData.total_commission) || 0,
             paid_commission: Number(customerData.paid_commission) || 0,

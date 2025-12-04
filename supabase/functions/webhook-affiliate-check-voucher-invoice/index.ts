@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-console.info('Webhook affiliate check voucher invoice started - v12 (Check totalrevenue BEFORE current invoice)');
+console.info('Webhook affiliate check voucher invoice started - v15 (Support lock_period_hours + lock_period_minutes)');
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -40,36 +40,73 @@ function normalizePhone(phone: string) {
 }
 
 // ============================================
-// GET LOCK PERIOD SETTINGS
+// GET LOCK PERIOD SETTINGS (v15: support hours + minutes)
 // ============================================
-async function getLockPeriodSettings(supabase: any): Promise<{ lock_period_days: number }> {
+interface LockPeriodSettings {
+  lock_period_days: number;
+  lock_period_hours: number;
+  lock_period_minutes: number;
+}
+
+async function getLockPeriodSettings(supabase: any): Promise<LockPeriodSettings> {
   try {
     const { data, error } = await supabase
       .from('lock_payment_settings')
-      .select('lock_period_days')
+      .select('lock_period_days, lock_period_hours, lock_period_minutes')
       .eq('is_active', true)
       .single();
 
     if (error || !data) {
-      console.log('[Lock Settings] ⚠️ Using default lock_period_days = 15');
-      return { lock_period_days: 15 };
+      console.log('[Lock Settings] ⚠️ Using default: 0 days, 24 hours, 0 minutes');
+      return { lock_period_days: 0, lock_period_hours: 24, lock_period_minutes: 0 };
     }
 
-    console.log(`[Lock Settings] ✅ lock_period_days = ${data.lock_period_days}`);
-    return { lock_period_days: data.lock_period_days };
+    // Use nullish coalescing for proper default handling
+    const settings: LockPeriodSettings = {
+      lock_period_days: data.lock_period_days ?? 0,
+      lock_period_hours: data.lock_period_hours ?? 24,
+      lock_period_minutes: data.lock_period_minutes ?? 0
+    };
+
+    console.log(`[Lock Settings] ✅ days=${settings.lock_period_days}, hours=${settings.lock_period_hours}, minutes=${settings.lock_period_minutes}`);
+    return settings;
   } catch (e) {
     console.error('[Lock Settings] ❌ Error fetching settings:', e);
-    return { lock_period_days: 15 };
+    return { lock_period_days: 0, lock_period_hours: 24, lock_period_minutes: 0 };
   }
 }
 
 // ============================================
-// CALCULATE LOCK DATE
+// CALCULATE LOCK DATE (v15: support hours + minutes)
 // ============================================
-function calculateLockDate(qualifiedAt: Date, lockPeriodDays: number): Date {
+function calculateLockDate(qualifiedAt: Date, settings: LockPeriodSettings): Date {
   const lockDate = new Date(qualifiedAt);
-  lockDate.setDate(lockDate.getDate() + lockPeriodDays);
+
+  // Add days
+  if (settings.lock_period_days > 0) {
+    lockDate.setDate(lockDate.getDate() + settings.lock_period_days);
+  }
+
+  // Add hours
+  if (settings.lock_period_hours > 0) {
+    lockDate.setHours(lockDate.getHours() + settings.lock_period_hours);
+  }
+
+  // Add minutes
+  if (settings.lock_period_minutes > 0) {
+    lockDate.setMinutes(lockDate.getMinutes() + settings.lock_period_minutes);
+  }
+
   return lockDate;
+}
+
+// Helper to format lock period for display
+function formatLockPeriod(settings: LockPeriodSettings): string {
+  const parts: string[] = [];
+  if (settings.lock_period_days > 0) parts.push(`${settings.lock_period_days} ngày`);
+  if (settings.lock_period_hours > 0) parts.push(`${settings.lock_period_hours} giờ`);
+  if (settings.lock_period_minutes > 0) parts.push(`${settings.lock_period_minutes} phút`);
+  return parts.length > 0 ? parts.join(' ') : '0 phút';
 }
 // ============================================
 // RECALCULATE F0 TIER
@@ -859,11 +896,12 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
   const now = getVietnamTime();
   const nowIso = now.toISOString();
 
-  // Get lock period settings
+  // Get lock period settings (v15: support hours + minutes)
   const lockSettings = await getLockPeriodSettings(supabase);
-  const lockDate = calculateLockDate(now, lockSettings.lock_period_days);
+  const lockDate = calculateLockDate(now, lockSettings);
+  const lockPeriodText = formatLockPeriod(lockSettings);
 
-  console.log(`[Lifetime] 📅 Lock period: ${lockSettings.lock_period_days} days`);
+  console.log(`[Lifetime] 📅 Lock period: ${lockPeriodText}`);
   console.log(`[Lifetime] 📅 Qualified at: ${nowIso}`);
   console.log(`[Lifetime] 📅 Lock date: ${lockDate.toISOString()}`);
 
@@ -907,7 +945,7 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     commission_month: null,  // Will be set when locked
     is_lifetime_commission: true,
     assignment_id: assignment.id,
-    notes: `Hoa hồng trọn đời từ F1 ${customerName || normalizedPhone}. Chờ chốt sau ${lockSettings.lock_period_days} ngày.`
+    notes: `Hoa hồng trọn đời từ F1 ${customerName || normalizedPhone}. Chờ chốt sau ${lockPeriodText}.`
   };
   const { data: newCommission, error: commissionError } = await supabase.from('commission_records').insert(commissionRecord).select('id').single();
   if (commissionError) {
@@ -920,14 +958,14 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
   // Create notification for F0
   const notificationContent = {
     title: 'Hoa hồng trọn đời (chờ chốt)!',
-    message: `Khách hàng ${customerName || normalizedPhone} đã mua hàng lại. Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng sau ${lockSettings.lock_period_days} ngày chờ chốt.`,
+    message: `Khách hàng ${customerName || normalizedPhone} đã mua hàng lại. Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng sau ${lockPeriodText} chờ chốt.`,
     voucher_code: assignment.first_voucher_code,
     invoice_code: invoiceDetail.code,
     commission_amount: commission.totalCommission,
     is_lifetime: true,
     status: 'pending',
     lock_date: lockDate.toISOString(),
-    days_until_lock: lockSettings.lock_period_days,
+    lock_period_text: lockPeriodText,
     breakdown: {
       basic: commission.basicCommission?.amount || 0,
       firstOrder: 0,
@@ -1275,12 +1313,13 @@ Deno.serve(async (req) => {
       const now = getVietnamTime().toISOString();
       let updateFields: any = {};
       let noteText = '';
+      // v15: commission_status = 'pending' (NEW LOCK SYSTEM) instead of 'available'
       const commonFields = {
         actual_user_phone: contactNumber,
         actual_user_name: customerName,
         actual_user_id: invoiceDetail.customerCode,
         actual_customer_type: commission.isValid ? 'new' : commission.invalidReasonCode === 'CUSTOMER_NOT_NEW' ? 'old' : null,
-        commission_status: commission.isValid ? 'available' : 'invalid',
+        commission_status: commission.isValid ? 'pending' : 'invalid',  // v15: pending instead of available
         invalid_reason_code: commission.isValid ? null : commission.invalidReasonCode,
         invalid_reason_text: commission.isValid ? null : commission.invalidReasonText,
         commission_calculated_at: now,
@@ -1343,12 +1382,13 @@ Deno.serve(async (req) => {
       if (commission.isValid && commission.totalCommission > 0) {
         console.log('[Affiliate] 📝 Creating commission_records entry...');
 
-        // NEW LOCK SYSTEM: Get lock period settings
+        // NEW LOCK SYSTEM: Get lock period settings (v15: support hours + minutes)
         const lockSettings = await getLockPeriodSettings(supabase);
         const qualifiedAt = getVietnamTime();
-        const lockDate = calculateLockDate(qualifiedAt, lockSettings.lock_period_days);
+        const lockDate = calculateLockDate(qualifiedAt, lockSettings);
+        const lockPeriodText = formatLockPeriod(lockSettings);
 
-        console.log(`[Affiliate] 📅 Lock period: ${lockSettings.lock_period_days} days`);
+        console.log(`[Affiliate] 📅 Lock period: ${lockPeriodText}`);
         console.log(`[Affiliate] 📅 Qualified at: ${qualifiedAt.toISOString()}`);
         console.log(`[Affiliate] 📅 Lock date: ${lockDate.toISOString()}`);
 
@@ -1418,15 +1458,15 @@ Deno.serve(async (req) => {
         const notificationContent = {
           title: shouldRecheck ? 'Hoa hồng đã được cập nhật (chờ chốt)!' : 'Hoa hồng mới (chờ chốt)!',
           message: shouldRecheck
-            ? `Hóa đơn ${invoiceDetail.code} đã thanh toán đủ! Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ ${customerName || contactNumber} sau ${lockSettings.lock_period_days} ngày chờ chốt.`
-            : `Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ đơn hàng của ${customerName || contactNumber} sau ${lockSettings.lock_period_days} ngày chờ chốt.`,
+            ? `Hóa đơn ${invoiceDetail.code} đã thanh toán đủ! Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ ${customerName || contactNumber} sau ${lockPeriodText} chờ chốt.`
+            : `Bạn sẽ nhận được ${commission.totalCommission.toLocaleString()}đ hoa hồng từ đơn hàng của ${customerName || contactNumber} sau ${lockPeriodText} chờ chốt.`,
           voucher_code: usedVoucherCode,
           invoice_code: invoiceDetail.code,
           commission_amount: commission.totalCommission,
           was_partial_payment: shouldRecheck,
           status: 'pending',
           lock_date: lockDate.toISOString(),
-          days_until_lock: lockSettings.lock_period_days,
+          lock_period_text: lockPeriodText,
           breakdown: {
             basic: commission.basicCommission?.amount || 0,
             firstOrder: commission.firstOrderCommission?.applied ? commission.firstOrderCommission.amount : 0,

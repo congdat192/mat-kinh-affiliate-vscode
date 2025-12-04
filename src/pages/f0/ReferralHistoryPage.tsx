@@ -103,7 +103,7 @@ interface Referral {
   voucherUsed: boolean;
   invoiceInfo: InvoiceInfo | null;
   // Commission fields
-  commissionStatus: 'pending' | 'available' | 'invalid' | 'paid';
+  commissionStatus: 'pending' | 'available' | 'invalid' | 'paid' | 'cancelled' | 'locked';
   invalidReasonCode: string | null;
   invalidReasonText: string | null;
   actualUserPhone: string | null;

@@ -35,8 +35,8 @@ export interface F1CustomerDetail extends F1CustomerSummary {
   first_invoice_date: string;
 }
 
-// v16: Commission status type for lock system
-export type CommissionStatus = 'pending' | 'locked' | 'paid' | 'cancelled';
+// v16: Commission status type for lock system (includes legacy 'available' and 'invalid')
+export type CommissionStatus = 'pending' | 'locked' | 'paid' | 'cancelled' | 'available' | 'invalid';
 
 export interface F1CustomerOrder {
   id: string;
