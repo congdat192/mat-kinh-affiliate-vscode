@@ -881,3 +881,87 @@ console.log(`[Log] Time (VN display): ${getVietnamTime().toISOString()}`);
 - Commission `lock_date` now calculated correctly
 - Lock period shows accurate countdown in F0 Portal
 - No more 7-hour offset issue
+
+---
+
+## 18. ReferralHistoryPage Tab Sync Fix (2025-12-05)
+
+### Problem
+Tab 2 "Hoa hồng trọn đời" không đồng bộ với Tab 1 "Voucher đã phát":
+- Thiếu cột "Điều Kiện"
+- Cột "Trạng Thái" dùng logic cũ (helper functions) thay vì lock system fields
+
+### Solution
+Sync Tab 2 display logic với Tab 1:
+
+**1. Update LifetimeCommission interface:**
+```typescript
+interface LifetimeCommission {
+  // ... existing fields
+  // Lock system fields (synced with Tab 1)
+  qualifiedAt: string | null;
+  lockDate: string | null;
+  lockedAt: string | null;
+  paidAt: string | null;
+  daysUntilLock: number | null;
+  minutesUntilLock: number | null;
+  timeUntilLockText: string | null;
+  invoiceCancelledAt: string | null;
+}
+```
+
+**2. Add "Điều Kiện" column to Tab 2:**
+| Condition | Display |
+|-----------|---------|
+| `cancelled` or `invoiceCancelledAt` | ❌ HĐ đã hủy (red) |
+| `paidAt` or `lockedAt` or `lockDate <= NOW()` | ✅ Đủ điều kiện (green) |
+| `qualifiedAt` (pending) | ⏳ Chờ xử lý (còn X) (yellow) |
+| else | -- |
+
+**3. Update "Trạng Thái" column logic:**
+| Condition | Display |
+|-----------|---------|
+| `paidAt` | Đã thanh toán (green badge) |
+| `cancelled` or `invoiceCancelledAt` | Đã hủy (red badge) |
+| `lockedAt` or `lockDate <= NOW()` | Chờ thanh toán (blue badge) |
+| `qualifiedAt` | Chờ xác nhận + countdown (yellow badge) |
+| else | -- |
+
+### Files Changed
+| File | Changes |
+|------|---------|
+| `ReferralHistoryPage.tsx` | +interface lock fields, +Điều Kiện column, +status logic sync |
+
+### Commits
+- `8d91966` - fix(referral-history): Sync Tab 2 (Lifetime) status display with Tab 1
+- `a534844` - fix(referral-history): Add missing 'Điều Kiện' column to Tab 2
+
+### Note
+This fix is **F0 Portal only**. Admin Affiliate (ERP-FE-fresh) was not modified.
+
+---
+
+## 19. Cron Jobs Summary
+
+### Affiliate Commission Crons
+| Cron | Purpose | Schedule | Query |
+|------|---------|----------|-------|
+| `cron-affiliate-commission-sync` | Backup for missed webhooks - scan invoices without commission | Every 15 min | Invoices with voucher but no commission_record |
+| `cron-lock-commissions` | Lock commissions when lock_date passed | Every 30 min | `WHERE lock_date <= NOW() AND status = 'pending'` |
+
+### Flow
+```
+Webhook (primary) → Set qualified_at, lock_date, status='pending'
+       ↓ (miss)
+Cron Sync (backup) → Same as webhook
+       ↓ (lock_date passed)
+Cron Lock → Update status='locked', locked_at=NOW()
+       ↓ (admin payment)
+Admin → Update status='paid', paid_at=NOW()
+```
+
+### FE Display Logic
+FE uses **both** `lockedAt` AND `lockDate <= NOW()` to show "Đủ điều kiện" immediately without waiting for cron:
+```typescript
+commission.lockedAt || (commission.lockDate && new Date(commission.lockDate) <= new Date())
+```
