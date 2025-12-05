@@ -6,11 +6,57 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-console.info('Cron affiliate commission sync started - v1');
+console.info('Cron affiliate commission sync started - v3 (Fix timezone: use new Date() for DB timestamps)');
+
+// ============================================
+// LOCK SYSTEM SETTINGS (v2)
+// ============================================
+interface LockPaymentSettings {
+  lock_period_days: number;
+  lock_period_hours: number;
+  lock_period_minutes: number;
+}
+
+let lockSettings: LockPaymentSettings | null = null;
+
+async function getLockSettings(supabase: any): Promise<LockPaymentSettings> {
+  if (lockSettings) return lockSettings;
+
+  const { data, error } = await supabase
+    .from('lock_payment_settings')
+    .select('lock_period_days, lock_period_hours, lock_period_minutes')
+    .limit(1)
+    .single();
+
+  if (error || !data) {
+    console.warn('[Lock] ⚠️ Could not fetch lock settings, using defaults');
+    lockSettings = { lock_period_days: 14, lock_period_hours: 0, lock_period_minutes: 0 };
+  } else {
+    lockSettings = {
+      lock_period_days: data.lock_period_days || 0,
+      lock_period_hours: data.lock_period_hours || 0,
+      lock_period_minutes: data.lock_period_minutes || 0
+    };
+    console.log(`[Lock] ✅ Settings loaded: ${lockSettings.lock_period_days}d ${lockSettings.lock_period_hours}h ${lockSettings.lock_period_minutes}m`);
+  }
+
+  return lockSettings;
+}
+
+// v2: Calculate lock_date from qualified_at + lock_period
+function calculateLockDate(qualifiedAt: Date, settings: LockPaymentSettings): Date {
+  const lockDate = new Date(qualifiedAt);
+  lockDate.setDate(lockDate.getDate() + settings.lock_period_days);
+  lockDate.setHours(lockDate.getHours() + settings.lock_period_hours);
+  lockDate.setMinutes(lockDate.getMinutes() + settings.lock_period_minutes);
+  return lockDate;
+}
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+// v3: getVietnamTime() only for DISPLAY, not for DB timestamps!
+// Supabase stores timestamps in UTC - this is correct behavior
 function getVietnamTime() {
   const now = new Date();
   const utcTime = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -117,11 +163,12 @@ async function recalculateF0Tier(supabase: any, f0Id: string, f0Code: string) {
     if (currentTier !== newTier.tier_code) {
       console.log(`[Tier] 🎉 TIER UPGRADE: ${currentTier} → ${newTier.tier_code}`);
 
+      // v3: Use new Date() for DB timestamps - Supabase stores in UTC
       await supabase
         .from('f0_partners')
         .update({
           current_tier: newTier.tier_code,
-          updated_at: getVietnamTime().toISOString()
+          updated_at: new Date().toISOString()
         })
         .eq('id', f0Id);
 
@@ -311,10 +358,12 @@ async function calculateFirstOrderCommission(supabase: any, invoiceAmount: numbe
 }
 
 // ============================================
-// PROCESS SINGLE VOUCHER
+// PROCESS SINGLE VOUCHER (v2: Lock System Support)
 // ============================================
-async function processVoucher(supabase: any, voucher: any) {
-  const now = getVietnamTime().toISOString();
+async function processVoucher(supabase: any, voucher: any, lockSettingsParam: LockPaymentSettings) {
+  // v3: Use new Date() for DB timestamps - Supabase stores in UTC, this is correct!
+  const now = new Date();
+  const nowISO = now.toISOString();
   console.log(`\n[Cron] Processing voucher: ${voucher.voucher_code}`);
   console.log(`[Cron]   F0: ${voucher.f0_code}`);
   console.log(`[Cron]   Invoice: ${voucher.invoice_code}`);
@@ -352,20 +401,32 @@ async function processVoucher(supabase: any, voucher: any) {
     f0Partner
   );
 
-  // Update voucher_affiliate_tracking
+  // v3: Calculate qualified_at and lock_date for lock system
+  // qualified_at = invoice date (when commission becomes qualified)
+  // lock_date = qualified_at + lock_period (when commission can be locked)
+  // NOTE: invoice_created_date from KiotViet is already in UTC, use directly
+  const qualifiedAt = voucher.invoice_created_date
+    ? new Date(voucher.invoice_created_date)
+    : now;  // now is already new Date() (UTC)
+  const lockDate = calculateLockDate(qualifiedAt, lockSettingsParam);
+
+  console.log(`[Cron]   qualified_at (UTC): ${qualifiedAt.toISOString()}`);
+  console.log(`[Cron]   lock_date (UTC): ${lockDate.toISOString()}`);
+
+  // Update voucher_affiliate_tracking (v2: use 'pending' instead of 'available')
   const updateFields: any = {
     actual_user_phone: customerPhone,
     actual_user_name: customerName,
     actual_user_id: voucher.invoice_customer_code,
     actual_customer_type: commission.isValid ? 'new' : (commission.invalidReasonCode === 'CUSTOMER_NOT_NEW' ? 'old' : null),
-    commission_status: commission.isValid ? 'available' : 'invalid',
+    commission_status: commission.isValid ? 'pending' : 'invalid',  // v2: 'pending' instead of 'available'
     invalid_reason_code: commission.isValid ? null : commission.invalidReasonCode,
     invalid_reason_text: commission.isValid ? null : commission.invalidReasonText,
-    commission_calculated_at: now,
-    updated_at: now,
+    commission_calculated_at: nowISO,
+    updated_at: nowISO,
     note: commission.isValid
-      ? `[Cron Sync] Hoa hồng: ${commission.totalCommission.toLocaleString()}đ`
-      : `[Cron Sync] ${commission.invalidReasonText || 'Không đủ điều kiện'}`
+      ? `[Cron Sync v2] Hoa hồng: ${commission.totalCommission.toLocaleString()}đ`
+      : `[Cron Sync v2] ${commission.invalidReasonText || 'Không đủ điều kiện'}`
   };
 
   await supabase
@@ -377,6 +438,7 @@ async function processVoucher(supabase: any, voucher: any) {
   if (commission.isValid && commission.totalCommission > 0) {
     console.log(`[Cron] ✅ Commission valid: ${commission.totalCommission.toLocaleString()}đ`);
 
+    // v2: Commission record with lock system fields
     const commissionRecord = {
       voucher_code: voucher.voucher_code,
       f0_id: voucher.f0_id,
@@ -408,9 +470,12 @@ async function processVoucher(supabase: any, voucher: any) {
       tier_bonus_amount: commission.tierBonus?.amount || null,
       subtotal_commission: commission.subtotalCommission,
       total_commission: commission.totalCommission,
-      status: 'available',
+      // v3: Lock system fields - timestamps already in UTC
+      status: 'pending',                        // Changed from 'available' to 'pending'
+      qualified_at: qualifiedAt.toISOString(),  // When commission becomes qualified (UTC)
+      lock_date: lockDate.toISOString(),        // When commission can be locked (UTC)
       is_lifetime_commission: false,
-      notes: '[Cron Sync] Commission created by backup cron job'
+      notes: '[Cron Sync v3] Commission with lock system support - UTC timestamps'
     };
 
     const { data: newCommission, error: commissionError } = await supabase
@@ -482,7 +547,8 @@ Deno.serve(async (req) => {
   const startTime = Date.now();
   console.log('====================================');
   console.log('[Cron] Starting affiliate commission sync...');
-  console.log(`[Cron] Time: ${getVietnamTime().toISOString()}`);
+  console.log(`[Cron] Time (UTC): ${new Date().toISOString()}`);
+  console.log(`[Cron] Time (VN display): ${getVietnamTime().toISOString()}`);
   console.log('====================================');
 
   try {
@@ -496,6 +562,10 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey, {
       db: { schema: 'api' }
     });
+
+    // v2: Load lock settings first
+    const lockSettingsLoaded = await getLockSettings(supabase);
+    console.log(`[Cron] 🔒 Lock period: ${lockSettingsLoaded.lock_period_days}d ${lockSettingsLoaded.lock_period_hours}h ${lockSettingsLoaded.lock_period_minutes}m`);
 
     // Query vouchers that need processing (limit 50 per run)
     const { data: vouchers, error: queryError } = await supabase
@@ -532,7 +602,7 @@ Deno.serve(async (req) => {
 
     for (const voucher of vouchers) {
       try {
-        const result = await processVoucher(supabase, voucher);
+        const result = await processVoucher(supabase, voucher, lockSettingsLoaded);
         if (result.success) {
           results.success++;
           results.totalCommission += result.commission || 0;

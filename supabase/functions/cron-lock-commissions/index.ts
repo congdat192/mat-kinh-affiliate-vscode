@@ -6,15 +6,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-console.info('Cron lock commissions started - v1 (Lock pending commissions after lock period)');
+console.info('Cron lock commissions started - v2 (Fix timezone: use new Date() for DB timestamps)');
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
+// v2: getVietnamTime() only for DISPLAY, not for DB timestamps!
+// Supabase stores timestamps in UTC - this is correct behavior
 function getVietnamTime() {
   const now = new Date();
   const utcTime = now.getTime() + now.getTimezoneOffset() * 60000;
   return new Date(utcTime + 7 * 3600000);
+}
+
+// v2: Get current month in Vietnam timezone (for commission_month display)
+function getVietnamMonth(): string {
+  const vnTime = getVietnamTime();
+  return vnTime.toISOString().slice(0, 7); // e.g., '2025-12'
 }
 
 // ============================================
@@ -99,11 +107,12 @@ async function recalculateF0Tier(supabase: any, f0Id: string, f0Code: string) {
     if (currentTier !== newTier.tier_code) {
       console.log(`[Tier] 🎉 TIER UPGRADE: ${currentTier} → ${newTier.tier_code}`);
 
+      // v2: Use new Date() for DB timestamps - Supabase stores in UTC
       const { error: updateError } = await supabase
         .from('f0_partners')
         .update({
           current_tier: newTier.tier_code,
-          updated_at: getVietnamTime().toISOString()
+          updated_at: new Date().toISOString()
         })
         .eq('id', f0Id);
 
@@ -165,14 +174,16 @@ Deno.serve(async (req) => {
       db: { schema: 'api' }
     });
 
-    const now = getVietnamTime();
+    // v2: Use new Date() for DB timestamps - Supabase stores in UTC, this is correct!
+    const now = new Date();
     const nowIso = now.toISOString();
-    const currentMonth = now.toISOString().slice(0, 7); // '2025-12'
+    const currentMonth = getVietnamMonth(); // Use VN timezone for commission_month display
 
     console.log('====================================');
     console.log('[Cron] 🔄 Starting commission lock process...');
-    console.log(`[Cron] Current time (VN): ${nowIso}`);
-    console.log(`[Cron] Current month: ${currentMonth}`);
+    console.log(`[Cron] Current time (UTC): ${nowIso}`);
+    console.log(`[Cron] Current time (VN display): ${getVietnamTime().toISOString()}`);
+    console.log(`[Cron] Current month (VN): ${currentMonth}`);
     console.log('====================================');
 
     // Step 1: Get all pending commissions that have passed their lock_date

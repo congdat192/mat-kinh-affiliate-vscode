@@ -823,3 +823,61 @@ To verify fix works:
 1. Set `lock_period_minutes = 1` in admin settings
 2. Create new order with affiliate voucher
 3. Check `commission_records.lock_date` = `qualified_at + 1 minute`
+
+---
+
+## 17. Timezone Fix for Database Timestamps (2025-12-05)
+
+### Related Error
+Lock period admin set 1 minute nhưng Portal hiển thị 8 giờ.
+
+### Root Cause
+`getVietnamTime()` tạo Date với VALUE = thời gian Vietnam (VD: 10:23 VN), nhưng khi gọi `.toISOString()`:
+- Output: `10:23:00.000Z` (UTC suffix)
+- Database interpret: 10:23 **UTC** = 17:23 Vietnam → sai 7 giờ!
+
+```javascript
+// ❌ WRONG - This was the bug
+getVietnamTime() = Date with value 10:23 (VN time)
+.toISOString() = "2025-12-05T10:23:00.000Z" (UTC suffix)
+// DB stores 10:23 UTC = 17:23 VN → 7 hours wrong!
+
+// ✅ CORRECT - The fix
+new Date() = Date with value 03:33 (actual UTC)
+.toISOString() = "2025-12-05T03:33:00.000Z"
+// DB stores 03:33 UTC = 10:33 VN → Correct!
+```
+
+### Solution
+**Principle**: Supabase/PostgreSQL stores ALL timestamps in UTC (+00) - this is **correct** behavior.
+
+- Use `new Date()` directly for timestamps saved to database
+- Keep `getVietnamTime()` only for **display/logging purposes**
+
+### Edge Functions Updated
+
+| Function | Version | Change |
+|----------|---------|--------|
+| `webhook-affiliate-check-voucher-invoice` | v17 | `getVietnamTime()` → `new Date()` for DB timestamps |
+| `cron-lock-commissions` | v2 | `getVietnamTime()` → `new Date()` for DB timestamps |
+| `cron-affiliate-commission-sync` | v3 | `getVietnamTime()` → `new Date()` for DB timestamps |
+
+### Code Pattern
+
+```typescript
+// ❌ WRONG - Do NOT use for DB timestamps
+const qualifiedAt = getVietnamTime();
+const isoString = qualifiedAt.toISOString(); // Wrong by 7 hours!
+
+// ✅ CORRECT - Use for DB timestamps
+const qualifiedAt = new Date();  // UTC time directly
+const isoString = qualifiedAt.toISOString(); // Correct!
+
+// ✅ CORRECT - Use getVietnamTime() only for display
+console.log(`[Log] Time (VN display): ${getVietnamTime().toISOString()}`);
+```
+
+### Impact
+- Commission `lock_date` now calculated correctly
+- Lock period shows accurate countdown in F0 Portal
+- No more 7-hour offset issue

@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
-console.info('Webhook affiliate check voucher invoice started - v15 (Support lock_period_hours + lock_period_minutes)');
+console.info('Webhook affiliate check voucher invoice started - v17 (Fix timezone: use new Date() for DB timestamps, getVietnamTime() only for display)');
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -12,6 +12,21 @@ function getVietnamTime() {
   const now = new Date();
   const utcTime = now.getTime() + now.getTimezoneOffset() * 60000;
   return new Date(utcTime + 7 * 3600000);
+}
+
+// v16: Convert Vietnam Date to ISO string with +07:00 timezone
+// IMPORTANT: getVietnamTime() returns a Date with Vietnam time values
+// but .toISOString() returns UTC suffix 'Z', causing 7-hour offset bug
+// This function formats the date components manually with +07:00 suffix
+function toVietnamISOString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const ms = String(date.getMilliseconds()).padStart(3, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${ms}+07:00`;
 }
 function convertToVietnamTZ(kiotDateString: string | null) {
   if (!kiotDateString) return null;
@@ -893,8 +908,8 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
   }
   // Create commission record for lifetime commission
   // NEW LOCK SYSTEM: status = 'pending', set qualified_at and lock_date
-  const now = getVietnamTime();
-  const nowIso = now.toISOString();
+  // v17: Use new Date() for DB timestamps - Supabase stores in UTC, this is correct!
+  const now = new Date();  // v17: Use UTC time directly
 
   // Get lock period settings (v15: support hours + minutes)
   const lockSettings = await getLockPeriodSettings(supabase);
@@ -902,8 +917,8 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
   const lockPeriodText = formatLockPeriod(lockSettings);
 
   console.log(`[Lifetime] 📅 Lock period: ${lockPeriodText}`);
-  console.log(`[Lifetime] 📅 Qualified at: ${nowIso}`);
-  console.log(`[Lifetime] 📅 Lock date: ${lockDate.toISOString()}`);
+  console.log(`[Lifetime] 📅 Qualified at (UTC): ${now.toISOString()}`);
+  console.log(`[Lifetime] 📅 Lock date (UTC): ${lockDate.toISOString()}`);
 
   const commissionRecord = {
     voucher_code: assignment.first_voucher_code,
@@ -940,8 +955,8 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     total_commission: commission.totalCommission,
     // NEW LOCK SYSTEM
     status: 'pending',  // Changed from 'available'
-    qualified_at: nowIso,
-    lock_date: lockDate.toISOString(),
+    qualified_at: now.toISOString(),    // v17: Use UTC directly
+    lock_date: lockDate.toISOString(),  // v17: Use UTC directly
     commission_month: null,  // Will be set when locked
     is_lifetime_commission: true,
     assignment_id: assignment.id,
@@ -964,7 +979,7 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     commission_amount: commission.totalCommission,
     is_lifetime: true,
     status: 'pending',
-    lock_date: lockDate.toISOString(),
+    lock_date: lockDate.toISOString(),  // v17: Use UTC directly
     lock_period_text: lockPeriodText,
     breakdown: {
       basic: commission.basicCommission?.amount || 0,
@@ -992,7 +1007,7 @@ async function checkLifetimeCommission(supabase: any, customerPhone: string, cus
     commission,
     commissionRecordId: newCommission.id,
     status: 'pending',
-    lock_date: lockDate.toISOString()
+    lock_date: lockDateIso  // v16: Use lockDateIso
   };
 }
 // ============================================
@@ -1383,14 +1398,15 @@ Deno.serve(async (req) => {
         console.log('[Affiliate] 📝 Creating commission_records entry...');
 
         // NEW LOCK SYSTEM: Get lock period settings (v15: support hours + minutes)
+        // v17: Use new Date() for DB timestamps - Supabase stores in UTC, this is correct!
         const lockSettings = await getLockPeriodSettings(supabase);
-        const qualifiedAt = getVietnamTime();
+        const qualifiedAt = new Date();  // v17: Use UTC time directly
         const lockDate = calculateLockDate(qualifiedAt, lockSettings);
         const lockPeriodText = formatLockPeriod(lockSettings);
 
         console.log(`[Affiliate] 📅 Lock period: ${lockPeriodText}`);
-        console.log(`[Affiliate] 📅 Qualified at: ${qualifiedAt.toISOString()}`);
-        console.log(`[Affiliate] 📅 Lock date: ${lockDate.toISOString()}`);
+        console.log(`[Affiliate] 📅 Qualified at (UTC): ${qualifiedAt.toISOString()}`);
+        console.log(`[Affiliate] 📅 Lock date (UTC): ${lockDate.toISOString()}`);
 
         const commissionRecord = {
           voucher_code: affiliateVoucher.code,
@@ -1426,8 +1442,8 @@ Deno.serve(async (req) => {
           total_commission: commission.totalCommission,
           // NEW LOCK SYSTEM
           status: 'pending',  // Changed from 'available'
-          qualified_at: qualifiedAt.toISOString(),
-          lock_date: lockDate.toISOString(),
+          qualified_at: qualifiedAt.toISOString(),  // v17: Use UTC directly
+          lock_date: lockDate.toISOString(),        // v17: Use UTC directly
           commission_month: null,  // Will be set when locked
           is_lifetime_commission: false // This is a first order
         };
@@ -1465,7 +1481,7 @@ Deno.serve(async (req) => {
           commission_amount: commission.totalCommission,
           was_partial_payment: shouldRecheck,
           status: 'pending',
-          lock_date: lockDate.toISOString(),
+          lock_date: lockDate.toISOString(),  // v17: Use UTC directly
           lock_period_text: lockPeriodText,
           breakdown: {
             basic: commission.basicCommission?.amount || 0,
