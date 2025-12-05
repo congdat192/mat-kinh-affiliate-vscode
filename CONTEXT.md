@@ -184,7 +184,7 @@ Tables synced from KiotViet POS via webhook:
 | `webhook-affiliate-check-voucher-invoice` | v15 | Handles KiotViet invoice webhook for commission calculation (lock system v16 + hours/minutes v15) |
 | `cron-affiliate-commission-sync` | v1 | Backup cron job for missed webhooks (runs every 15 min) |
 | `cron-lock-commissions` | v1 | Locks pending commissions after 15-day period (runs daily at 1:00 AM) |
-| `admin-process-payment-batch` | v2 | Admin batch payment with selective F0 support (monthly/selective modes) |
+| `admin-process-payment-batch` | v8 | Admin batch payment with selective commission support (approved_commission_ids + batch completion) |
 
 ### Auth Functions
 | Function | Description |
@@ -965,3 +965,63 @@ FE uses **both** `lockedAt` AND `lockDate <= NOW()` to show "Đủ điều kiệ
 ```typescript
 commission.lockedAt || (commission.lockDate && new Date(commission.lockDate) <= new Date())
 ```
+
+---
+
+## 20. Admin Batch Payment Selection Fix (2025-12-05)
+
+### Related Plan (ERP Project)
+- `PLAN-FIX-BATCH-PAYMENT-3-BUGS.md`
+
+### Overview
+Admin ERP có thể chọn specific commissions để thanh toán thay vì tất cả commissions của F0.
+
+### Edge Function `admin-process-payment-batch` v8
+
+**New Parameters:**
+```typescript
+{
+  f0_ids?: string[];              // F0 IDs to pay
+  approved_commission_ids?: string[];  // NEW: Specific commission IDs to pay
+  payment_month?: string;
+  admin_user_id: string;
+  admin_user_name: string;
+  notes?: string;
+  rejected_commissions?: Array<{ id: string; reason: string }>;
+}
+```
+
+**Key Changes:**
+1. **Selective Commission Filter**: Nếu `approved_commission_ids` được truyền, chỉ thanh toán những commission IDs đó (không phải tất cả của F0)
+2. **Batch Status Completion**: Sau khi payment xong, batch status được update trực tiếp thành `'completed'`
+
+### Impact on F0 Portal
+
+**WithdrawalPage.tsx - "Lịch sử thanh toán" Tab:**
+- Now correctly shows completed batches (status = 'completed')
+- Edge Function `get-f0-payment-history` returns correct data
+
+**MyCustomersPage.tsx:**
+- Commission status badges display correctly after admin payment
+
+### Data Flow
+```
+Admin ERP: Select specific commissions → Click "Thanh toán"
+     │
+     ▼
+Edge Function v8:
+     │ Filter: WHERE id IN (approved_commission_ids)
+     │ Update: commission_records.status = 'paid'
+     │ Update: payment_batches.status = 'completed'
+     ▼
+F0 Portal: WithdrawalPage
+     │ Call: get-f0-payment-history
+     │ Shows: payment_batches WHERE status = 'completed'
+     ▼
+Display: Batch appears in "Lịch sử thanh toán" ✓
+```
+
+### Testing
+1. Admin ERP: Chọn 1 commission từ 10, bấm thanh toán
+2. Verify: Chỉ 1 commission được cập nhật `status = 'paid'`
+3. F0 Portal: Kiểm tra "Lịch sử thanh toán" hiển thị batch mới

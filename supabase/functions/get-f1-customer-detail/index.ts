@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-console.info('get-f1-customer-detail v3 - Get F1 customer detail with order history (v17 revenue/orders breakdown)');
+console.info('get-f1-customer-detail v4 - Get F1 customer detail with order history (added cancelled_at/cancelled_reason)');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -131,6 +131,9 @@ Deno.serve(async (req) => {
         lock_date: o.lock_date || null,
         locked_at: o.locked_at || null,
         days_until_lock: daysUntilLock,
+        // v4: Cancelled commission fields
+        cancelled_at: o.cancelled_at || null,
+        cancelled_reason: o.cancelled_reason || null,
         created_at: o.created_at
       };
     });

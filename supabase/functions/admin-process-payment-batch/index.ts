@@ -6,7 +6,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
 };
 
-console.info('Admin process payment batch started - v2 (Supports selective F0 payment)');
+console.info('Admin process payment batch started - v8 (Added approved_commission_ids filter + direct batch completion)');
+
+// v3: Interface for rejected commissions
+interface RejectedCommission {
+  id: string;
+  reason: string;
+}
 
 // ============================================
 // HELPER FUNCTIONS
@@ -51,9 +57,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-      db: { schema: 'api' }
-    });
+    // Create Supabase client - use service role key for full access
+    // Note: db.schema config may not work reliably in Edge Functions
+    // We'll use explicit .schema('api') for each query instead
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Parse request body
     const body = await req.json().catch(() => ({}));
@@ -63,8 +70,15 @@ Deno.serve(async (req) => {
       payment_month,      // Optional if f0_ids provided, Required otherwise: '2025-11'
       admin_user_id,      // Required: UUID of admin user
       admin_user_name,    // Required: Name of admin user
-      notes               // Optional: Notes for this payment batch
+      notes,              // Optional: Notes for this payment batch
+      // v3: Selective rejection
+      rejected_commissions, // Optional: Array<{ id: string; reason: string }>
+      // v8: Specific commission IDs to pay (filter within F0)
+      approved_commission_ids // Optional: Array of commission IDs to pay (for selective approval within F0)
     } = body;
+
+    // v3: Generate tracking ID for structured logging
+    const trackingId = crypto.randomUUID();
 
     // Validate required fields
     if (!admin_user_id || !admin_user_name) {
@@ -109,21 +123,72 @@ Deno.serve(async (req) => {
     const nowIso = toVietnamISOString(now);
     const paymentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
-    console.log('====================================');
-    console.log('[Payment] 💰 Starting payment batch process (v2)...');
-    console.log(`[Payment] Mode: ${isSelectiveMode ? 'SELECTIVE (by F0 IDs)' : 'MONTHLY (all locked)'}`);
-    if (isSelectiveMode) {
-      console.log(`[Payment] Selected F0s: ${f0_ids.length}`);
-    }
-    if (payment_month) {
-      console.log(`[Payment] Payment month filter: ${payment_month}`);
-    }
-    console.log(`[Payment] Admin: ${admin_user_name} (${admin_user_id})`);
-    console.log(`[Payment] Process time: ${nowIso}`);
-    console.log('====================================');
+    // v8: Check if specific commission IDs were provided
+    const hasApprovedIds = approved_commission_ids && Array.isArray(approved_commission_ids) && approved_commission_ids.length > 0;
 
-    // Step 1: Build query based on mode
+    console.log(JSON.stringify({
+      tracking_id: trackingId,
+      timestamp: new Date().toISOString(),
+      function: 'admin-process-payment-batch',
+      event: 'START',
+      data: {
+        mode: isSelectiveMode ? 'selective' : 'monthly',
+        f0_count: isSelectiveMode ? f0_ids.length : null,
+        payment_month,
+        admin_user_name,
+        rejected_count: rejected_commissions?.length || 0,
+        approved_commission_ids_count: hasApprovedIds ? approved_commission_ids.length : 0
+      }
+    }));
+
+    // v3: Process rejected commissions FIRST (before payment query)
+    const rejectedIds: string[] = [];
+    let rejectedCount = 0;
+
+    if (rejected_commissions && Array.isArray(rejected_commissions) && rejected_commissions.length > 0) {
+      console.log(JSON.stringify({
+        tracking_id: trackingId,
+        timestamp: new Date().toISOString(),
+        function: 'admin-process-payment-batch',
+        event: 'PROCESS_REJECTIONS_START',
+        data: { rejected_count: rejected_commissions.length }
+      }));
+
+      for (const rejected of rejected_commissions as RejectedCommission[]) {
+        const { error: rejectError } = await supabase
+          .schema('api')
+          .from('commission_records')
+          .update({
+            status: 'cancelled',
+            cancelled_at: nowIso,
+            cancelled_by: admin_user_id,
+            cancelled_by_name: admin_user_name,
+            cancelled_reason: rejected.reason,
+            updated_at: nowIso
+          })
+          .eq('id', rejected.id);
+
+        if (rejectError) {
+          console.error(`[Payment] ❌ Failed to reject commission ${rejected.id}:`, rejectError.message);
+        } else {
+          rejectedIds.push(rejected.id);
+          rejectedCount++;
+          console.log(`[Payment] ✅ Rejected commission ${rejected.id}: ${rejected.reason}`);
+        }
+      }
+
+      console.log(JSON.stringify({
+        tracking_id: trackingId,
+        timestamp: new Date().toISOString(),
+        function: 'admin-process-payment-batch',
+        event: 'PROCESS_REJECTIONS_END',
+        data: { rejected_count: rejectedCount, rejected_ids: rejectedIds }
+      }));
+    }
+
+    // Step 1: Build query based on mode - MUST use .schema('api') explicitly
     let query = supabase
+      .schema('api')
       .from('commission_records')
       .select('id, f0_id, f0_code, voucher_code, invoice_code, total_commission, f1_phone, f1_name, commission_month')
       .eq('status', 'locked');
@@ -132,6 +197,13 @@ Deno.serve(async (req) => {
       // Selective mode: filter by F0 IDs
       query = query.in('f0_id', f0_ids);
 
+      // v8: If specific commission IDs are provided, filter by them
+      // This is the key fix for Bug #1 - only pay selected commissions, not all for F0
+      if (hasApprovedIds) {
+        query = query.in('id', approved_commission_ids);
+        console.log(`[Payment] v8: Filtering by ${approved_commission_ids.length} specific commission IDs`);
+      }
+
       // Optionally also filter by month if provided
       if (payment_month) {
         query = query.eq('commission_month', payment_month);
@@ -139,6 +211,11 @@ Deno.serve(async (req) => {
     } else {
       // Monthly mode: filter by payment_month
       query = query.eq('commission_month', payment_month);
+    }
+
+    // v3: Exclude already-rejected commissions from this batch
+    if (rejectedIds.length > 0) {
+      query = query.not('id', 'in', `(${rejectedIds.join(',')})`);
     }
 
     const { data: lockedCommissions, error: fetchError } = await query;
@@ -207,16 +284,18 @@ Deno.serve(async (req) => {
     // Step 3: Create payment batch record via RPC
     const batchId = crypto.randomUUID();
 
-    const { error: createBatchError } = await supabase.rpc('create_payment_batch', {
+    // v7: Fixed parameter order to match RPC signature
+    // RPC signature: (p_id, p_payment_month, p_payment_date, p_total_f0_count, p_total_commission, p_created_by, p_created_by_name, p_status, p_notes)
+    const { error: createBatchError } = await supabase.schema('api').rpc('create_payment_batch', {
       p_id: batchId,
       p_payment_month: batchPaymentMonth,
       p_payment_date: paymentDate,
       p_total_f0_count: f0Count,
       p_total_commission: totalAmount,
-      p_status: 'processing',
       p_created_by: admin_user_id,
       p_created_by_name: admin_user_name,
-      p_notes: notes || (isSelectiveMode ? `Selective payment for ${f0Count} F0s` : null)
+      p_status: 'processing',  // Optional param with default
+      p_notes: notes || (isSelectiveMode ? `Selective payment for ${f0Count} F0s` : null)  // Optional param with default
     });
 
     if (createBatchError) {
@@ -233,6 +312,7 @@ Deno.serve(async (req) => {
 
     for (const commission of lockedCommissions) {
       const { error: updateError } = await supabase
+        .schema('api')
         .from('commission_records')
         .update({
           status: 'paid',
@@ -266,7 +346,7 @@ Deno.serve(async (req) => {
       const f0Code = commissions[0].f0_code;
       const f0CommissionMonths = [...new Set(commissions.map(c => c.commission_month))].filter(Boolean);
 
-      const { error: notifError } = await supabase.from('notifications').insert({
+      const { error: notifError } = await supabase.schema('api').from('notifications').insert({
         f0_id: f0Id,
         type: 'payment',
         content: {
@@ -281,7 +361,7 @@ Deno.serve(async (req) => {
         is_read: false
       });
 
-      notificationResults.push({ f0_code, success: !notifError });
+      notificationResults.push({ f0_code: f0Code, success: !notifError });
 
       if (notifError) {
         console.error(`[Payment] ⚠️ Failed to send notification to ${f0Code}:`, notifError.message);
@@ -291,15 +371,37 @@ Deno.serve(async (req) => {
     }
 
     // Step 6: Update batch status to completed
-    const { error: completeBatchError } = await supabase.rpc('complete_payment_batch', {
-      p_batch_id: batchId,
-      p_completed_by: admin_user_id,
-      p_completed_by_name: admin_user_name,
-      p_status: errorCount === 0 ? 'completed' : 'completed_with_errors'
-    });
+    // v8: Use direct UPDATE instead of RPC to ensure batch status is updated
+    // This is the key fix for Bug #2 - batch must be 'completed' for Accountant tab to show it
+    const finalStatus = errorCount === 0 ? 'completed' : 'completed_with_errors';
+
+    const { error: completeBatchError } = await supabase
+      .schema('api')
+      .from('payment_batches')
+      .update({
+        status: finalStatus,
+        completed_at: nowIso,
+        completed_by: admin_user_id,
+        completed_by_name: admin_user_name
+      })
+      .eq('id', batchId);
 
     if (completeBatchError) {
-      console.log('[Payment] ⚠️ RPC complete_payment_batch failed, batch remains in processing state');
+      console.error('[Payment] ⚠️ Failed to update batch status to completed:', completeBatchError.message);
+      // Try RPC as fallback
+      const { error: rpcError } = await supabase.schema('api').rpc('complete_payment_batch', {
+        p_batch_id: batchId,
+        p_completed_by: admin_user_id,
+        p_completed_by_name: admin_user_name,
+        p_status: finalStatus
+      });
+      if (rpcError) {
+        console.error('[Payment] ⚠️ RPC fallback also failed:', rpcError.message);
+      } else {
+        console.log('[Payment] ✅ Batch status updated via RPC fallback');
+      }
+    } else {
+      console.log(`[Payment] ✅ Batch status updated to '${finalStatus}'`);
     }
 
     // Step 7: Log summary
@@ -324,6 +426,22 @@ Deno.serve(async (req) => {
       notification_sent: notificationResults.find(n => n.f0_code === commissions[0].f0_code)?.success || false
     }));
 
+    // v3: Log completion with structured logging
+    console.log(JSON.stringify({
+      tracking_id: trackingId,
+      timestamp: new Date().toISOString(),
+      function: 'admin-process-payment-batch',
+      event: 'END',
+      data: {
+        success: true,
+        paid_count: paidCount,
+        rejected_count: rejectedCount,
+        error_count: errorCount,
+        total_amount: totalAmount,
+        f0_count: f0Count
+      }
+    }));
+
     return new Response(JSON.stringify({
       success: true,
       message: errorCount === 0
@@ -332,11 +450,16 @@ Deno.serve(async (req) => {
       payment_batch_id: batchId,
       payment_mode: isSelectiveMode ? 'selective' : 'monthly',
       payment_month: batchPaymentMonth,
+      // Approved commissions
       paid_count: paidCount,
+      total_amount: totalAmount,
+      total_f0_count: f0Count,
+      // v3: Rejected commissions info
+      rejected_count: rejectedCount,
+      rejected_commission_ids: rejectedIds,
+      // Errors
       error_count: errorCount,
       failed_commission_ids: failedCommissions,
-      total_f0_count: f0Count,
-      total_amount: totalAmount,
       f0_summary: f0Summary,
       processed_at: nowIso
     }), {
