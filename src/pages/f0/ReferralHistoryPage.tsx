@@ -153,6 +153,15 @@ interface LifetimeCommission {
   breakdown: CommissionBreakdown;
   notes: string | null;
   createdAt: string;
+  // Lock system fields (synced with Tab 1)
+  qualifiedAt: string | null;
+  lockDate: string | null;
+  lockedAt: string | null;
+  paidAt: string | null;
+  daysUntilLock: number | null;
+  minutesUntilLock: number | null;
+  timeUntilLockText: string | null;
+  invoiceCancelledAt: string | null;
 }
 
 interface Pagination {
@@ -889,10 +898,34 @@ const ReferralHistoryPage = () => {
                             {formatCurrency(commission.totalCommission)}
                           </span>
                         </TableCell>
+                        {/* Trạng Thái column - v8: Use same logic as Tab 1 for consistency */}
                         <TableCell>
-                          <Badge variant={getCommissionStatusVariant(commission.status)}>
-                            {getCommissionStatusText(commission.status)}
-                          </Badge>
+                          {commission.paidAt ? (
+                            <Badge variant="success" className="flex items-center gap-1 w-fit">
+                              <CheckCircle className="w-3 h-3" />
+                              Đã thanh toán
+                            </Badge>
+                          ) : (commission.status === 'cancelled' || commission.invoiceCancelledAt) ? (
+                            <Badge variant="danger" className="flex items-center gap-1 w-fit">
+                              <X className="w-3 h-3" />
+                              Đã hủy
+                            </Badge>
+                          ) : commission.lockedAt || (commission.lockDate && new Date(commission.lockDate) <= new Date()) ? (
+                            <Badge variant="info" className="flex items-center gap-1 w-fit">
+                              <Lock className="w-3 h-3" />
+                              Chờ thanh toán
+                            </Badge>
+                          ) : commission.qualifiedAt ? (
+                            <Badge variant="warning" className="flex items-center gap-1 w-fit">
+                              <Clock className="w-3 h-3" />
+                              Chờ xác nhận
+                              {commission.timeUntilLockText && (
+                                <span className="ml-1">({commission.timeUntilLockText})</span>
+                              )}
+                            </Badge>
+                          ) : (
+                            <span className="text-gray-400">--</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-center">
                           <Button
@@ -1231,10 +1264,34 @@ const ReferralHistoryPage = () => {
                   Thông Tin Hoa Hồng
                 </h3>
 
+                {/* v8: Use same status display logic as Tab 1 */}
                 <div className="mb-3">
-                  <Badge variant={getCommissionStatusVariant(selectedLifetimeCommission.status)}>
-                    {getCommissionStatusText(selectedLifetimeCommission.status)}
-                  </Badge>
+                  {selectedLifetimeCommission.paidAt ? (
+                    <Badge variant="success" className="flex items-center gap-1 w-fit">
+                      <CheckCircle className="w-3 h-3" />
+                      Đã thanh toán
+                    </Badge>
+                  ) : (selectedLifetimeCommission.status === 'cancelled' || selectedLifetimeCommission.invoiceCancelledAt) ? (
+                    <Badge variant="danger" className="flex items-center gap-1 w-fit">
+                      <X className="w-3 h-3" />
+                      Đã hủy
+                    </Badge>
+                  ) : selectedLifetimeCommission.lockedAt || (selectedLifetimeCommission.lockDate && new Date(selectedLifetimeCommission.lockDate) <= new Date()) ? (
+                    <Badge variant="info" className="flex items-center gap-1 w-fit">
+                      <Lock className="w-3 h-3" />
+                      Chờ thanh toán
+                    </Badge>
+                  ) : selectedLifetimeCommission.qualifiedAt ? (
+                    <Badge variant="warning" className="flex items-center gap-1 w-fit">
+                      <Clock className="w-3 h-3" />
+                      Chờ xác nhận
+                      {selectedLifetimeCommission.timeUntilLockText && (
+                        <span className="ml-1">({selectedLifetimeCommission.timeUntilLockText})</span>
+                      )}
+                    </Badge>
+                  ) : (
+                    <Badge variant="default">Chờ xử lý</Badge>
+                  )}
                 </div>
 
                 <div className="space-y-3">
