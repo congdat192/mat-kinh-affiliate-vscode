@@ -865,6 +865,7 @@ const ReferralHistoryPage = () => {
                       <TableHead>Ngày Mua</TableHead>
                       <TableHead>Giá Trị ĐH</TableHead>
                       <TableHead>Hoa Hồng</TableHead>
+                      <TableHead>Điều Kiện</TableHead>
                       <TableHead>Trạng Thái</TableHead>
                       <TableHead className="text-center">Chi Tiết</TableHead>
                     </TableRow>
@@ -897,6 +898,32 @@ const ReferralHistoryPage = () => {
                           <span className="font-bold text-green-600">
                             {formatCurrency(commission.totalCommission)}
                           </span>
+                        </TableCell>
+                        {/* Điều Kiện column - v9: Sync with Tab 1 */}
+                        <TableCell>
+                          {(commission.status === 'cancelled' || commission.invoiceCancelledAt) ? (
+                            <div className="flex items-center gap-1">
+                              <X className="w-4 h-4 text-red-500" />
+                              <span className="text-xs text-red-600">HĐ đã hủy</span>
+                            </div>
+                          ) : commission.paidAt || commission.lockedAt || (commission.lockDate && new Date(commission.lockDate) <= new Date()) ? (
+                            <div className="flex items-center gap-1">
+                              <CheckCircle className="w-4 h-4 text-green-500" />
+                              <span className="text-xs text-green-600">Đủ điều kiện</span>
+                            </div>
+                          ) : commission.qualifiedAt ? (
+                            <div className="flex items-center gap-1">
+                              <Clock className="w-4 h-4 text-yellow-500" />
+                              <span className="text-xs text-yellow-600">
+                                Chờ xử lý
+                                {commission.timeUntilLockText && (
+                                  <span className="ml-1">({commission.timeUntilLockText})</span>
+                                )}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">--</span>
+                          )}
                         </TableCell>
                         {/* Trạng Thái column - v8: Use same logic as Tab 1 for consistency */}
                         <TableCell>
