@@ -1025,3 +1025,58 @@ Display: Batch appears in "Lịch sử thanh toán" ✓
 1. Admin ERP: Chọn 1 commission từ 10, bấm thanh toán
 2. Verify: Chỉ 1 commission được cập nhật `status = 'paid'`
 3. F0 Portal: Kiểm tra "Lịch sử thanh toán" hiển thị batch mới
+
+---
+
+## 21. Delete F0 Partner Cascade Fix (2025-12-05)
+
+### Problem
+Admin ERP xóa F0 partner báo lỗi: `column "auth_id" does not exist`
+
+### Root Cause
+RPC function `delete_f0_partner_cascade` assumed F0 partners use Supabase `auth.users` (via `auth_id` column). But F0 Portal uses **custom authentication** with `password_hash` stored directly in `f0_partners` table.
+
+### Solution
+1. Removed `auth_id` reference from RPC function
+2. Removed DELETE from `auth.users` (not needed for F0)
+3. Added 4 missing tables to cascade delete:
+   - `commission_audit_log`
+   - `commission_history`
+   - `f0_stats_adjustments`
+   - `withdrawal_requests`
+
+### RPC Function: `api.delete_f0_partner_cascade`
+Deletes 15 types of F0-related data in correct order:
+1. commission_records
+2. f1_customer_assignments
+3. voucher_affiliate_tracking
+4. notifications
+5. referral_links + referral_links_backup
+6. otp_verifications (by phone)
+7. password_resets
+8. payment_batches (only batches exclusive to this F0)
+9. commission_audit_log
+10. commission_history
+11. f0_stats_adjustments
+12. withdrawal_requests
+13. storage.objects (avatar)
+14. f0_partners (parent)
+
+### Key Architecture Note
+```
+┌─────────────────────────────────────────┐
+│           F0 AUTHENTICATION             │
+├─────────────────────────────────────────┤
+│ F0 Portal does NOT use Supabase Auth!   │
+│                                         │
+│ Login flow:                             │
+│ 1. User enters phone + password         │
+│ 2. Edge Function hashes password        │
+│ 3. Compare with password_hash in        │
+│    f0_partners table                    │
+│ 4. Return custom JWT if match           │
+│                                         │
+│ ❌ NO auth.users table for F0           │
+│ ❌ NO auth_id column in f0_partners     │
+└─────────────────────────────────────────┘
+```
